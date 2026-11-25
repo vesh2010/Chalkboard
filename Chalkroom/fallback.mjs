@@ -98,7 +98,11 @@ export async function tryRoutes(routes, messages, signal, request = fetch, budge
 export async function gatewayLesson(body, authorization, upstream, signal, getRoutes, request = fetch, onBackup = () => {}) {
   const deadline = Date.now() + routingBudgetMs;
   const messages = JSON.parse(body).messages;
-  const primaryLimit = AbortSignal.timeout(55000);
+  // Reserve time for failover when backup routes exist. Without a backup,
+  // give the configured primary nearly the full server request budget.
+  const routes = (await getRoutes()).filter(route => route.url && route.url.href !== upstream);
+  const primaryBudgetMs = routes.length ? 55000 : Math.max(1000, deadline - Date.now() - 5000);
+  const primaryLimit = AbortSignal.timeout(primaryBudgetMs);
   let status = 502;
   try {
     const response = await request(upstream,{method:'POST',redirect:'error',
@@ -112,18 +116,21 @@ export async function gatewayLesson(body, authorization, upstream, signal, getRo
     }
     status = response.status;
     if ([401,403].includes(status)) {
-      const backupRoutes = (await getRoutes()).filter(route => route.url && route.url.href !== upstream);
-      if (!backupRoutes.length) {
+      if (!routes.length) {
         return {status,body:JSON.stringify({error:{message:'FreeLLMAPI rejected the saved gateway key (HTTP ' + status + '). Open API settings, test the key, and paste a current unified key from the FreeLLMAPI desktop app.'}})};
       }
     }
     await response.body?.cancel();
   } catch { signal.throwIfAborted(); }
   const primaryTimedOut = primaryLimit.aborted;
-  const routes = (await getRoutes()).filter(route => route.url?.href !== upstream);
-  const result = await tryRoutes(routes,messages,signal,request,deadline-Date.now(),onBackup);
+  const result = routes.length
+    ? await tryRoutes(routes,messages,signal,request,deadline-Date.now(),onBackup)
+    : {error:{message:'No backup providers configured.'}};
   if (!result.error) return {status:200,body:JSON.stringify(result)};
   const reason = primaryTimedOut ? 'timed out' : [401,403].includes(status) ? 'rejected the saved key (HTTP ' + status + ')' : 'is unavailable (HTTP ' + status + ')';
-  const detail = routes.length ? result.error.message : 'Add another provider to Chalkroom/.env for automatic fallback.';
+  const detail = routes.length ? result.error.message
+    : primaryTimedOut
+      ? 'The gateway did not complete within ' + Math.round(primaryBudgetMs / 1000) + ' seconds. Check whether FreeLLMAPI has an active model, select Fast routing in API settings, or add a backup provider to Chalkroom/.env.'
+      : 'Add another provider to Chalkroom/.env for automatic fallback.';
   return {status:502,body:JSON.stringify({error:{message:'The primary gateway ' + reason + '. ' + detail}})};
 }
