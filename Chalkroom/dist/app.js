@@ -956,10 +956,12 @@ async function playVoice() {
     return segments?.length > 1 ? segments : [text];
   };
   async function localClip(text) {
-    const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text,voice:narrator}),signal:request.signal});
-    if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || 'The local tutor voice could not generate audio. Press Play voice to retry.');
-    return response.blob();
+    return window.chalkAudioCache.getOrLoad('local:' + narrator + ':' + text, async () => {
+      const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text,voice:narrator}),signal:request.signal});
+      if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || 'The local tutor voice could not generate audio. Press Play voice to retry.');
+      return response.blob();
+    });
   }
   async function nextCue() {
     if (request.signal.aborted) return;
