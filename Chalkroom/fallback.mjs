@@ -104,17 +104,26 @@ export async function gatewayLesson(body, authorization, upstream, signal, getRo
     const response = await request(upstream,{method:'POST',redirect:'error',
       headers:{Authorization:authorization,'Content-Type':'application/json'},body,
       signal:AbortSignal.any([signal,primaryLimit])});
-    if (![408,429].includes(response.status) && response.status < 500) {
+    // A gateway token can be revoked or rotated during a lesson. If local
+    // backup providers are configured, let them handle authentication errors
+    // instead of ending the learner's follow-up with an immediate 401.
+    if (![401,403,408,429].includes(response.status) && response.status < 500) {
       return {status:response.status,body:await response.text()};
     }
     status = response.status;
+    if ([401,403].includes(status)) {
+      const backupRoutes = (await getRoutes()).filter(route => route.url && route.url.href !== upstream);
+      if (!backupRoutes.length) {
+        return {status,body:JSON.stringify({error:{message:'FreeLLMAPI rejected the saved gateway key (HTTP ' + status + '). Open API settings, test the key, and paste a current unified key from the FreeLLMAPI desktop app.'}})};
+      }
+    }
     await response.body?.cancel();
   } catch { signal.throwIfAborted(); }
   const primaryTimedOut = primaryLimit.aborted;
   const routes = (await getRoutes()).filter(route => route.url?.href !== upstream);
   const result = await tryRoutes(routes,messages,signal,request,deadline-Date.now(),onBackup);
   if (!result.error) return {status:200,body:JSON.stringify(result)};
-  const reason = primaryTimedOut ? 'timed out' : 'is unavailable (HTTP ' + status + ')';
+  const reason = primaryTimedOut ? 'timed out' : [401,403].includes(status) ? 'rejected the saved key (HTTP ' + status + ')' : 'is unavailable (HTTP ' + status + ')';
   const detail = routes.length ? result.error.message : 'Add another provider to Chalkroom/.env for automatic fallback.';
   return {status:502,body:JSON.stringify({error:{message:'The primary gateway ' + reason + '. ' + detail}})};
 }
