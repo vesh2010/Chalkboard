@@ -43,7 +43,15 @@ window.teacherFace = (() => {
         levels[i]=Math.sqrt(energy/(end-i*hop));
         peak=Math.max(peak,levels[i]);
       }
-      const smooth = levels.map((_,i) => levels.slice(Math.max(0,i-3),i+4).reduce((a,b)=>a+b,0)/7);
+      const smooth = new Float32Array(levels.length);
+      let windowSum = 0;
+      for (let i=0; i<Math.min(4,levels.length); i++) windowSum += levels[i];
+      for (let i=0; i<levels.length; i++) {
+        const start = Math.max(0,i-3), end = Math.min(levels.length,i+4);
+        smooth[i] = windowSum / (end-start);
+        if (i>=3) windowSum -= levels[i-3];
+        if (i+4<levels.length) windowSum += levels[i+4];
+      }
       let beats=0,last=-15;
       for(let i=1;i<smooth.length-1;i++) {
         if(i-last>=12 && smooth[i]>peak*.10 && smooth[i]>=smooth[i-1] && smooth[i]>smooth[i+1]) {
@@ -58,7 +66,11 @@ window.teacherFace = (() => {
   function animate(read) {
     stop();
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    function tick() { mouth(read()); frame=requestAnimationFrame(tick); }
+    let lastFrame = -Infinity;
+    function tick(now) {
+      if (now-lastFrame>=32) { mouth(read()); lastFrame=now; }
+      frame=requestAnimationFrame(tick);
+    }
     tick();
   }
   function media(player,profile) {
