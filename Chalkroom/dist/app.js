@@ -1039,8 +1039,8 @@ async function playVoice() {
         const items = $('board').querySelectorAll('li');
         items.forEach(item => {
           item.style.visibility = 'visible';
-          window.liveInk?.play(item);
         });
+        window.liveInk?.playSequence(items);
         window.teacherFace?.media(player, profile);
       };
       player.onpause = player.onwaiting = () => {
@@ -1157,6 +1157,7 @@ $('interrupt').onclick = () => { closePanels(); pauseTeaching(); $('ask').hidden
 $('dismiss-ask').onclick = () => { micSession?.cancelDraft?.(true); $('ask').hidden = true; $('interrupt').focus(); };
 $('leave-board').onclick = newLesson;
 let sheetLayouts = new WeakMap();
+let lastSheetNavigation = '';
 let renderedSlides = [];
 function boardPosition() {
   const board = $('board');
@@ -1187,6 +1188,14 @@ function moveBoardSheet(direction) {
   else if (step + direction >= 0 && step + direction < (current.mainStepCount ?? current.steps.length)) {
     selectBoardSheet(step + direction, direction > 0 ? 0 : Infinity);
   }
+}
+let sheetUpdateFrame = 0;
+function scheduleSheets() {
+  if (sheetUpdateFrame) return;
+  sheetUpdateFrame = requestAnimationFrame(() => {
+    sheetUpdateFrame = 0;
+    updateSheets();
+  });
 }
 function updateSheets() {
   const board = $('board');
@@ -1239,15 +1248,19 @@ function updateSheets() {
   }
   $('prev').disabled = active <= 0;
   $('next').disabled = active >= slides.length - 1;
-  $('sheet-position').textContent = 'Step ' + (step + 1) + ' of ' + steps.length + ' · Sheet ' + (page + 1) + ' of ' + count;
+  const position = 'Step ' + (step + 1) + ' of ' + steps.length + ' · Sheet ' + (page + 1) + ' of ' + count;
+  if (position !== lastSheetNavigation) {
+    $('sheet-position').textContent = position;
+    lastSheetNavigation = position;
+  }
 }
 function resizeBoardSheets() {
   sheetLayouts = new WeakMap();
-  updateSheets();
+  scheduleSheets();
 }
 if (window.ResizeObserver) new window.ResizeObserver(resizeBoardSheets).observe($('board'));
 else window.addEventListener?.('resize',resizeBoardSheets);
-$('board').onscroll = updateSheets;
+$('board').onscroll = scheduleSheets;
 let boardSwipe;
 let suppressSwipeClick = false;
 $('board').onpointerdown = event => {
