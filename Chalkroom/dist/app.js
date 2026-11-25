@@ -1669,8 +1669,9 @@ async function customLesson(topic, files, search, options) {
         throw Error(failure?.error?.message || 'Local API fallback returned HTTP ' + response.status + '.');
       }
       if ([401,403].includes(response.status)) {
+        const failure = isFree && localGateway ? await response.json().catch(() => null) : null;
         throw Error(isFree && localGateway
-          ? 'FreeLLMAPI returned HTTP ' + response.status + '. Open API settings and select Test FreeLLMAPI key to check gateway authentication.'
+          ? (failure?.error?.message || 'FreeLLMAPI rejected the saved gateway key (HTTP ' + response.status + '). Open API settings, test the key and save a current unified key. If the key passes but lesson requests fail, restart FreeLLMAPI and check its active model routing.')
           : 'Gateway returned HTTP ' + response.status + '. Check your API key and its permissions.');
       }
       if (isFree && localGateway && response.status === 504) throw Error('FreeLLMAPI timed out before the model finished. Retry or change Model routing in API settings.');
