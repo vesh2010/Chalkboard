@@ -1,5 +1,7 @@
 import {createServer} from 'node:http';
 import {readFile, writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {gzipSync} from 'node:zlib';
 import {parseEnv} from 'node:util';
 import {loadRoutes,tryRoutes,gatewayLesson} from './fallback.mjs';
 import {speak} from './voice.mjs';
@@ -21,6 +23,28 @@ const files = new Map([
   ['/convert.html', ['convert.html', 'text/html']]
 ]);
 const maxBytes = 1024 * 1024;
+// Local-only bounded caches prevent repeated disk I/O and voice synthesis.
+const staticCache = new Map();
+const voiceCache = new Map();
+let voiceCacheBytes = 0;
+const maxVoiceCacheBytes = 24 * 1024 * 1024;
+function cacheVoice(key, audio) {
+  if (audio.length > maxVoiceCacheBytes) return;
+  if (voiceCache.has(key)) voiceCacheBytes -= voiceCache.get(key).length;
+  voiceCache.delete(key);
+  voiceCache.set(key, audio);
+  voiceCacheBytes += audio.length;
+  while (voiceCacheBytes > maxVoiceCacheBytes) {
+    const oldest = voiceCache.keys().next().value;
+    voiceCacheBytes -= voiceCache.get(oldest).length;
+    voiceCache.delete(oldest);
+  }
+}
+function cachedVoice(key) {
+  const audio = voiceCache.get(key);
+  if (audio) { voiceCache.delete(key); voiceCache.set(key, audio); }
+  return audio;
+}
 
 function send(res, status, content, type = 'application/json') {
   res.writeHead(status, {'Content-Type': type, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'});
@@ -32,10 +56,33 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && files.has(req.url)) {
     const [file, type] = files.get(req.url);
     try {
-      if (type.startsWith('image/') || type.startsWith('audio/')) return send(res,200,await readFile(new URL('./dist/' + file,import.meta.url)),type);
-      let content = await readFile(new URL('./dist/' + file, import.meta.url), 'utf8');
-      if (file === 'index.html') content = content.replace('<head>', '<head><meta name="chalkroom-local-gateway" content="enabled">');
-      return send(res, 200, content, type + '; charset=utf-8');
+      // The source files do not change during a running local server session.
+      // Restart the server after editing dist/ to invalidate this cache.
+      if (!staticCache.has(file)) {
+        let body = await readFile(new URL('./dist/' + file, import.meta.url));
+        if (file === 'index.html') {
+          body = Buffer.from(body.toString('utf8').replace('<head>', '<head><meta name="chalkroom-local-gateway" content="enabled">'));
+        }
+        const etag = '"' + createHash('sha256').update(body).digest('hex').slice(0,16) + '"';
+        const compressed = /^(text\/|application\/javascript)/.test(type) && body.length > 1024 ? gzipSync(body) : null;
+        staticCache.set(file,{body,etag,compressed});
+      }
+      const asset = staticCache.get(file);
+      const headers = {
+        'Content-Type': type + (type.startsWith('text/') ? '; charset=utf-8' : ''),
+        'Cache-Control': 'private, max-age=0, must-revalidate',
+        'ETag': asset.etag,
+        'Vary': 'Accept-Encoding',
+        'X-Content-Type-Options': 'nosniff'
+      };
+      if (req.headers['if-none-match'] === asset.etag) {
+        res.writeHead(304, headers); res.end(); return;
+      }
+      const zipped = asset.compressed && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+      if (zipped) headers['Content-Encoding'] = 'gzip';
+      res.writeHead(200,headers);
+      res.end(zipped ? asset.compressed : asset.body);
+      return;
     } catch {
       return send(res, 500, JSON.stringify({error:'Chalkroom could not read its application files.'}));
     }
@@ -98,7 +145,14 @@ const server = createServer(async (req, res) => {
         if (!response.ok) return send(res,502,JSON.stringify({error:'ElevenLabs returned HTTP ' + response.status + '. Check your voice ID, key permissions and credits.'}));
         return send(res,200,Buffer.from(await response.arrayBuffer()),'audio/mpeg');
       }
-      try { return send(res,200,await speak(text,controller.signal,voice),'audio/wav'); }
+      try {
+        const cacheKey = createHash('sha256').update((voice || 'cori') + '\0' + text).digest('hex');
+        const hit = cachedVoice(cacheKey);
+        if (hit) return send(res,200,hit,'audio/wav');
+        const wav = await speak(text,controller.signal,voice);
+        if (!controller.signal.aborted) cacheVoice(cacheKey,wav);
+        return send(res,200,wav,'audio/wav');
+      }
       catch { if (!res.destroyed) send(res,503,'{}'); return; }
     }
     if (auto) {
