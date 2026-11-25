@@ -4,6 +4,15 @@ window.liveInk = (() => {
   const ns = 'http://www.w3.org/2000/svg';
   let frame, finish, context, noiseGain, enabled = true, pointerCleanup;
   const rows = new WeakMap();
+  const glyphLengths = new Map();
+  const fallbackWidths = new Map();
+  const maxGlyphCache = 512;
+  const lowPower = (navigator.hardwareConcurrency || 4) <= 4;
+  function remember(cache, key, value) {
+    if (cache.size >= maxGlyphCache) cache.delete(cache.keys().next().value);
+    cache.set(key, value);
+    return value;
+  }
 
   const colorPalette = {
     teal: '#81e1cb',
@@ -121,7 +130,9 @@ window.liveInk = (() => {
         'stroke-linejoin': 'round'
       });
       svg.append(p);
-      strokes.push({p, dx, dy, length: p.getTotalLength()});
+      const length = glyphLengths.has(d) ? glyphLengths.get(d) :
+        remember(glyphLengths, d, p.getTotalLength());
+      strokes.push({p, dx, dy, length});
       return p;
     }
 
@@ -134,7 +145,9 @@ window.liveInk = (() => {
         const label = element('text', {x, y: y + 22, 'font-size': 22, fill: '#f4edcf', 'font-family': 'Inter, "Segoe UI", sans-serif'});
         label.textContent = char; svg.append(label);
         strokes.push({label, length: 16, dx: x, dy: y + 18});
-        x += label.getComputedTextLength() || 16;
+        const measured = fallbackWidths.has(char) ? fallbackWidths.get(char) :
+          remember(fallbackWidths, char, label.getComputedTextLength() || 16);
+        x += measured;
       }
     }
 
@@ -306,7 +319,7 @@ window.liveInk = (() => {
     };
   }
 
-  function play(row) {
+  function play(row, onComplete) {
     stop();
     const ink = rows.get(row);
     if (!ink || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -339,6 +352,7 @@ window.liveInk = (() => {
     const start = performance.now();
     const duration = Math.min(7500, Math.max(550, total * 1.3));
 
+    let previousTipFrame = 0;
     function tick(now) {
       const distance = total * Math.min(1, (now - start) / duration);
       while (index < strokes.length && done + strokes[index].length <= distance) {
@@ -349,6 +363,7 @@ window.liveInk = (() => {
       }
       if (index === strokes.length) {
         stop();
+        onComplete?.();
         return;
       }
       const s = strokes[index];
@@ -356,8 +371,11 @@ window.liveInk = (() => {
       if (s.p) {
         const offset = Math.max(0, distance - done);
         s.p.style.strokeDashoffset = s.length - offset;
-        const point = s.p.getPointAtLength(offset);
-        tip.setAttribute('transform', 'translate(' + (point.x + s.dx) + ' ' + (point.y + s.dy) + ')');
+        if (!lowPower || now - previousTipFrame >= 32) {
+          const point = s.p.getPointAtLength(offset);
+          tip.setAttribute('transform', 'translate(' + (point.x + s.dx) + ' ' + (point.y + s.dy) + ')');
+          previousTipFrame = now;
+        }
         tip.setAttribute('visibility', 'visible');
       } else {
         s.label.style.opacity = 1;
@@ -368,9 +386,19 @@ window.liveInk = (() => {
     frame = requestAnimationFrame(tick);
   }
 
+  function playSequence(elements) {
+    const queue = [...elements];
+    const next = () => {
+      const row = queue.shift();
+      if (row) play(row, next);
+    };
+    next();
+  }
+
   return {
     render,
     play,
+    playSequence,
     pointer,
     stop,
     unlock,
