@@ -13,6 +13,7 @@ const upstream = 'http://127.0.0.1:31415/v1/chat/completions';
 const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/audio-cache.js', ['audio-cache.js', 'text/javascript']],
   ['/pen-font.js', ['pen-font.js','text/javascript']],
   ['/live-board.js', ['live-board.js','text/javascript']],
   ['/teacher-face.js', ['teacher-face.js','text/javascript']],
