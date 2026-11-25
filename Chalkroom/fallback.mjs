@@ -34,12 +34,22 @@ function hasLesson(data) {
 
 // Leave time for the local HTTP server (175 s) to send its final response.
 const routingBudgetMs = 170000;
+// Keep routing statistics only in memory; credentials never enter this map.
+const routeHealth = new Map();
+function orderedRoutes(routes) {
+  const now = Date.now();
+  return [...routes].sort((a,b) => {
+    const aa = routeHealth.get(a.slot), bb = routeHealth.get(b.slot);
+    const score = h => h ? (h.failUntil > now ? 1000000 : 0) + (h.latency || 0) : 0;
+    return score(aa) - score(bb) || a.slot-b.slot;
+  });
+}
 
 export async function tryRoutes(routes, messages, signal, request = fetch, budgetMs = routingBudgetMs, onAttempt = () => {}) {
   const deadline = Date.now() + budgetMs;
   let remainingRoutes = routes.filter(route => route.url).length;
   const attempts = [];
-  for (const {slot,key,model,url} of routes) {
+  for (const {slot,key,model,url} of orderedRoutes(routes)) {
     signal.throwIfAborted();
     if (!url) { attempts.push('API ' + slot + ' has invalid settings'); continue; }
     const remainingMs = deadline - Date.now();
@@ -48,6 +58,12 @@ export async function tryRoutes(routes, messages, signal, request = fetch, budge
     // provider gets the entire balance for generating the lesson and diagrams.
     const limit = AbortSignal.timeout(Math.max(1,Math.floor(remainingMs / remainingRoutes--)));
     onAttempt(slot);
+    const started = Date.now();
+    function failed() {
+      const previous = routeHealth.get(slot);
+      const failures = Math.min(5,(previous?.failures || 0)+1);
+      routeHealth.set(slot,{failures,latency:previous?.latency || 0,failUntil:Date.now()+Math.min(30000,2000*2**failures)});
+    }
     try {
       const response = await request(url,{
         method:'POST',redirect:'error',signal:AbortSignal.any([signal,limit]),
@@ -56,15 +72,23 @@ export async function tryRoutes(routes, messages, signal, request = fetch, budge
       });
       if (!response.ok) {
         await response.body?.cancel();
+        failed();
         attempts.push('API ' + slot + ' returned HTTP ' + response.status);
         continue;
       }
       const data = await response.json().catch(() => null);
       signal.throwIfAborted();
-      if (hasLesson(data)) return {choices:[{message:{content:data.choices[0].message.content}}],fallbackSlot:slot};
+      if (hasLesson(data)) {
+        const previous = routeHealth.get(slot);
+        const duration = Date.now()-started;
+        routeHealth.set(slot,{failures:0,failUntil:0,latency:previous?.latency ? Math.round(previous.latency*.7+duration*.3) : duration});
+        return {choices:[{message:{content:data.choices[0].message.content}}],fallbackSlot:slot};
+      }
+      failed();
       attempts.push('API ' + slot + (limit.aborted ? ' timed out' : ' returned an unreadable lesson'));
     } catch {
       signal.throwIfAborted();
+      failed();
       attempts.push('API ' + slot + (limit.aborted ? ' timed out' : ' could not connect'));
     }
   }

@@ -950,11 +950,18 @@ async function playVoice() {
   activeBoard().querySelectorAll('li').forEach((line,i) => line.style.visibility = singleLine || completed.has(i) ? 'visible' : 'hidden');
   let index = cuePosition;
   let upcoming;
+  const splitSpeech = text => {
+    if (text.length < 180) return [text];
+    const segments = text.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map(x => x.trim()).filter(Boolean);
+    return segments?.length > 1 ? segments : [text];
+  };
   async function localClip(text) {
-    const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text,voice:narrator}),signal:request.signal});
-    if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || 'The local tutor voice could not generate audio. Press Play voice to retry.');
-    return response.blob();
+    return window.chalkAudioCache.getOrLoad('local:' + narrator + ':' + text, async () => {
+      const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text,voice:narrator}),signal:request.signal});
+      if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || 'The local tutor voice could not generate audio. Press Play voice to retry.');
+      return response.blob();
+    });
   }
   async function nextCue() {
     if (request.signal.aborted) return;
@@ -1039,8 +1046,8 @@ async function playVoice() {
         const items = $('board').querySelectorAll('li');
         items.forEach(item => {
           item.style.visibility = 'visible';
-          window.liveInk?.play(item);
         });
+        window.liveInk?.playSequence(items);
         window.teacherFace?.media(player, profile);
       };
       player.onpause = player.onwaiting = () => {
@@ -1078,11 +1085,15 @@ async function playVoice() {
     if (!localGateway && !key) { stopVoice(); settings(); return; }
     try {
       let clip;
+      let remainingSpeech = [];
       if (localGateway) {
-        clip = await (upcoming || localClip(narration));
+        const segments = splitSpeech(narration);
+        remainingSpeech = segments.slice(1);
+        clip = await (upcoming || localClip(segments[0]));
         if (request.signal.aborted) return;
-        upcoming = !singleLine && cues[index] ? localClip(cues[index].text) : null;
-        upcoming?.catch(()=>{}); // Playback consumes any prefetch error when this cue is reached.
+        upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
+          (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
+        upcoming?.catch(()=>{});
         audioUrl = URL.createObjectURL(clip);
         audio = new Audio(audioUrl);
       } else if (provider === alibaba) {
@@ -1105,7 +1116,30 @@ async function playVoice() {
       if (request.signal.aborted) return;
       player.playbackRate = profile?.rate || .97;
       player.preservesPitch = true;
-      player.onended = nextCue;
+      player.onended = async function onSegmentEnd() {
+        if (request.signal.aborted) return;
+        if (!localGateway || !remainingSpeech.length) return nextCue();
+        const segment = remainingSpeech.shift();
+        try {
+          const part = await (upcoming || localClip(segment));
+          if (request.signal.aborted) return;
+          upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
+            (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
+          upcoming?.catch(()=>{});
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+          audioUrl = URL.createObjectURL(part);
+          const nextPlayer = audio = new Audio(audioUrl);
+          nextPlayer.onended = onSegmentEnd;
+          nextPlayer.onplaying = () => { if (!request.signal.aborted) window.teacherFace?.media(nextPlayer, null); };
+          nextPlayer.onpause = nextPlayer.onwaiting = () => {
+            if (audio === nextPlayer) window.teacherFace?.stop();
+          };
+          nextPlayer.onerror = () => { if (!request.signal.aborted) { stopVoice(); status('Could not play the tutor audio.',true); } };
+          await nextPlayer.play();
+        } catch (error) {
+          if (!request.signal.aborted) { stopVoice(); status(error.message,true); }
+        }
+      };
       player.onplaying = () => {
         if (request.signal.aborted) return;
         beginWriting();
@@ -1157,6 +1191,7 @@ $('interrupt').onclick = () => { closePanels(); pauseTeaching(); $('ask').hidden
 $('dismiss-ask').onclick = () => { micSession?.cancelDraft?.(true); $('ask').hidden = true; $('interrupt').focus(); };
 $('leave-board').onclick = newLesson;
 let sheetLayouts = new WeakMap();
+let lastSheetNavigation = '';
 let renderedSlides = [];
 function boardPosition() {
   const board = $('board');
@@ -1187,6 +1222,14 @@ function moveBoardSheet(direction) {
   else if (step + direction >= 0 && step + direction < (current.mainStepCount ?? current.steps.length)) {
     selectBoardSheet(step + direction, direction > 0 ? 0 : Infinity);
   }
+}
+let sheetUpdateFrame = 0;
+function scheduleSheets() {
+  if (sheetUpdateFrame) return;
+  sheetUpdateFrame = requestAnimationFrame(() => {
+    sheetUpdateFrame = 0;
+    updateSheets();
+  });
 }
 function updateSheets() {
   const board = $('board');
@@ -1239,15 +1282,19 @@ function updateSheets() {
   }
   $('prev').disabled = active <= 0;
   $('next').disabled = active >= slides.length - 1;
-  $('sheet-position').textContent = 'Step ' + (step + 1) + ' of ' + steps.length + ' · Sheet ' + (page + 1) + ' of ' + count;
+  const position = 'Step ' + (step + 1) + ' of ' + steps.length + ' · Sheet ' + (page + 1) + ' of ' + count;
+  if (position !== lastSheetNavigation) {
+    $('sheet-position').textContent = position;
+    lastSheetNavigation = position;
+  }
 }
 function resizeBoardSheets() {
   sheetLayouts = new WeakMap();
-  updateSheets();
+  scheduleSheets();
 }
 if (window.ResizeObserver) new window.ResizeObserver(resizeBoardSheets).observe($('board'));
 else window.addEventListener?.('resize',resizeBoardSheets);
-$('board').onscroll = updateSheets;
+$('board').onscroll = scheduleSheets;
 let boardSwipe;
 let suppressSwipeClick = false;
 $('board').onpointerdown = event => {
