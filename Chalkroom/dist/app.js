@@ -950,6 +950,11 @@ async function playVoice() {
   activeBoard().querySelectorAll('li').forEach((line,i) => line.style.visibility = singleLine || completed.has(i) ? 'visible' : 'hidden');
   let index = cuePosition;
   let upcoming;
+  const splitSpeech = text => {
+    if (text.length < 180) return [text];
+    const segments = text.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map(x => x.trim()).filter(Boolean);
+    return segments?.length > 1 ? segments : [text];
+  };
   async function localClip(text) {
     const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text,voice:narrator}),signal:request.signal});
@@ -1078,11 +1083,15 @@ async function playVoice() {
     if (!localGateway && !key) { stopVoice(); settings(); return; }
     try {
       let clip;
+      let remainingSpeech = [];
       if (localGateway) {
-        clip = await (upcoming || localClip(narration));
+        const segments = splitSpeech(narration);
+        remainingSpeech = segments.slice(1);
+        clip = await (upcoming || localClip(segments[0]));
         if (request.signal.aborted) return;
-        upcoming = !singleLine && cues[index] ? localClip(cues[index].text) : null;
-        upcoming?.catch(()=>{}); // Playback consumes any prefetch error when this cue is reached.
+        upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
+          (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
+        upcoming?.catch(()=>{});
         audioUrl = URL.createObjectURL(clip);
         audio = new Audio(audioUrl);
       } else if (provider === alibaba) {
@@ -1105,7 +1114,30 @@ async function playVoice() {
       if (request.signal.aborted) return;
       player.playbackRate = profile?.rate || .97;
       player.preservesPitch = true;
-      player.onended = nextCue;
+      player.onended = async function onSegmentEnd() {
+        if (request.signal.aborted) return;
+        if (!localGateway || !remainingSpeech.length) return nextCue();
+        const segment = remainingSpeech.shift();
+        try {
+          const part = await (upcoming || localClip(segment));
+          if (request.signal.aborted) return;
+          upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
+            (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
+          upcoming?.catch(()=>{});
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+          audioUrl = URL.createObjectURL(part);
+          const nextPlayer = audio = new Audio(audioUrl);
+          nextPlayer.onended = onSegmentEnd;
+          nextPlayer.onplaying = () => { if (!request.signal.aborted) window.teacherFace?.media(nextPlayer, null); };
+          nextPlayer.onpause = nextPlayer.onwaiting = () => {
+            if (audio === nextPlayer) window.teacherFace?.stop();
+          };
+          nextPlayer.onerror = () => { if (!request.signal.aborted) { stopVoice(); status('Could not play the tutor audio.',true); } };
+          await nextPlayer.play();
+        } catch (error) {
+          if (!request.signal.aborted) { stopVoice(); status(error.message,true); }
+        }
+      };
       player.onplaying = () => {
         if (request.signal.aborted) return;
         beginWriting();
