@@ -84,3 +84,22 @@ body:has(#lesson:not([hidden]))>.sidebar,body:has(#lesson:not([hidden])) main>he
 #work-context span{grid-column:1/-1;color:#81e1cb;font-size:.76rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
 #work-context p{margin:0;line-height:1.45}
 #work-context button{color:#f5f0d2;border-color:rgba(255,255,255,.28);background:transparent;white-space:nowrap}
+
+/* Professor Paws: lightweight vector tutor, no image download or canvas redraw. */
+.dog-portrait{width:76px;height:76px;border-radius:50%;overflow:hidden;box-shadow:0 2px 12px #0d291d40}
+.dog-avatar{display:block;width:100%;height:100%;overflow:hidden}
+.dog-subtitle{display:block;font:500 10px/1.3 system-ui;color:#c4e1cf;margin-top:2px}
+.dog-head{transform-origin:60px 83px}
+.dog-eyes{transform-origin:60px 55px;animation:paws-blink 6s infinite}
+.dog-ear-left{transform-origin:35px 35px}.dog-ear-right{transform-origin:85px 35px}
+.dog-avatar[data-speaking="true"] .dog-head{animation:paws-nod 3.4s ease-in-out infinite}
+.dog-avatar[data-speaking="true"] .dog-ear-left{animation:paws-ear 4.2s ease-in-out infinite}
+.dog-avatar[data-speaking="true"] .dog-ear-right{animation:paws-ear 4.2s 1.3s ease-in-out infinite reverse}
+.teacher-dock:has(#caption:not([hidden])) .dog-portrait{box-shadow:0 0 0 3px #b8e2a950}
+#voice-options select{display:block;width:100%;margin-top:4px}
+#voice-options .voice-hint{font:12px/1.45 system-ui;color:#365b4a;margin:0}
+@keyframes paws-blink{0%,44%,48%,100%{transform:scaleY(1)}46%{transform:scaleY(.12)}}
+@keyframes paws-nod{0%,100%{transform:rotate(-1.5deg)}50%{transform:rotate(1.5deg)}}
+@keyframes paws-ear{0%,85%,100%{transform:rotate(0)}91%{transform:rotate(7deg)}}
+@media(max-width:760px){.dog-portrait{width:48px;height:48px}.dog-subtitle{display:none}}
+@media(prefers-reduced-motion:reduce){.dog-avatar *{animation:none!important;transition:none!important}}

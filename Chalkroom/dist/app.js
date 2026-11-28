@@ -25,25 +25,51 @@ let profile = read('profile', {});
 let history = read('history', []);
 let key = '';
 const localGateway = Boolean(document.head?.querySelector('meta[name="chalkroom-local-gateway"]'));
-const savedNarrator = read('narrator','storyteller');
-let narrator = ['ryan','alan','cori','storyteller','elevenlabs'].includes(savedNarrator) ? savedNarrator : 'storyteller';
+const voiceStyles = window.chalkVoiceStyles;
+const savedStyle = read('voiceStyle','gentle');
+let voiceStyle = Object.hasOwn(voiceStyles,savedStyle) ? savedStyle : 'gentle';
+const savedNarrator = read('narratorV2','auto');
+let narrator = ['auto','ryan','alan','cori','storyteller','elevenlabs'].includes(savedNarrator) ? savedNarrator : 'auto';
+function delivery() { return voiceStyles[voiceStyle]; }
+function voicePreferenceChanged() {
+  const playing = Boolean(voiceRequest || localSpeechActive);
+  if (playing) { pauseTeaching(); playVoice(); }
+}
+{
+  const styleLabel = make('label','Teaching voice style');
+  const styleSelect = make('select');
+  styleSelect.id = 'voice-style';
+  for (const [id,style] of Object.entries(voiceStyles)) {
+    const option=make('option',style.label); option.value=id; styleSelect.append(option);
+  }
+  styleSelect.value=voiceStyle;
+  styleSelect.onchange=()=>{voiceStyle=styleSelect.value; persist('voiceStyle',voiceStyle); voicePreferenceChanged();};
+  styleLabel.append(styleSelect);
+  $('voice-options').append(styleLabel);
+}
 if (localGateway) {
-  const label = make('label','Tutor voice ');
+  const label = make('label','Voice engine');
   const select = make('select');
-  for (const [id,name] of [['storyteller','Ryan · storyteller'],['ryan','Ryan · lively'],['cori','Cori · gentle'],['alan','Alan · steady'],['elevenlabs','ElevenLabs · my library voice']]) {
+  select.id = 'voice-engine';
+  for (const [id,name] of [['auto','Auto · natural voice when configured'],['elevenlabs','ElevenLabs · my natural voice'],['cori','Cori · local neural voice'],['storyteller','Ryan · warm storyteller'],['ryan','Ryan · local neural voice'],['alan','Alan · local neural voice']]) {
     const option = make('option',name);
     option.value = id;
     select.append(option);
   }
   select.value = narrator;
   select.onchange = () => {
-    stopVoice();
     narrator = select.value;
-    persist('narrator',narrator);
-    playVoice();
+    persist('narratorV2',narrator);
+    voicePreferenceChanged();
   };
   label.append(select);
-  $('voice-options').append(label);
+  const hint=make('p','Auto prefers ElevenLabs if configured in .env; otherwise it uses Cori locally. Voice quality depends on the installed engine.');
+  hint.className='voice-hint';
+  $('voice-options').append(label,hint);
+} else {
+  const hint=make('p','Cloud providers use their neural voices when supported. Browser-only voices depend on your device.');
+  hint.className='voice-hint';
+  $('voice-options').append(hint);
 }
 let provider = localGateway ? 'FreeLLMAPI' : 'Gemini';
 const alibaba = 'Alibaba Cloud';
@@ -889,7 +915,7 @@ function updateStepNavigation() {
 }
 function stopVoice() {
   cancelStepWait();
-  window.teacherFace?.stop();
+  window.dogTutor?.stop();
   window.liveInk?.stop();
   voiceRequest?.abort();
   voiceRequest = undefined;
@@ -950,22 +976,27 @@ async function playVoice() {
   activeBoard().querySelectorAll('li').forEach((line,i) => line.style.visibility = singleLine || completed.has(i) ? 'visible' : 'hidden');
   let index = cuePosition;
   let upcoming;
+  const style = delivery();
+  const chosenVoice = narrator, chosenStyle = voiceStyle;
   const splitSpeech = text => {
-    if (text.length < 180) return [text];
-    const segments = text.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g)?.map(x => x.trim()).filter(Boolean);
-    return segments?.length > 1 ? segments : [text];
+    if (text.length < 180 || !Intl.Segmenter) return [text];
+    const segments = [...new Intl.Segmenter('en',{granularity:'sentence'}).segment(text)].map(x=>x.segment.trim()).filter(Boolean);
+    return segments.length > 1 ? segments : [text];
   };
   async function localClip(text) {
-    return window.chalkAudioCache.getOrLoad('local:' + narrator + ':' + text, async () => {
+    const load = async () => {
       const response = await fetch('/voice',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text,voice:narrator}),signal:request.signal});
+        body:JSON.stringify({text,voice:chosenVoice,style:chosenStyle}),signal:request.signal});
       if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || 'The local tutor voice could not generate audio. Press Play voice to retry.');
       return response.blob();
-    });
+    };
+    // Resolve auto on the server every time so changed .env settings take effect.
+    return chosenVoice === 'auto' || chosenVoice === 'elevenlabs' ? load() :
+      window.chalkAudioCache.getOrLoad('local:v2:' + chosenVoice + ':' + chosenStyle + ':' + text,load);
   }
   async function nextCue() {
     if (request.signal.aborted) return;
-    window.teacherFace?.stop();
+    window.dogTutor?.stop();
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = undefined;
     if (singleLine && linePlayed) {
@@ -1005,11 +1036,11 @@ async function playVoice() {
       player.currentTime = start;
 
       let profile = current._audioProfile;
-      if (!profile && window.teacherFace) {
+      if (!profile && window.dogTutor) {
         try {
           const resp = await fetch(current.audioUrl);
           const blob = await resp.blob();
-          profile = current._audioProfile = await window.teacherFace.analyse(blob);
+          profile = current._audioProfile = await window.dogTutor.analyse(blob);
         } catch {}
       }
 
@@ -1048,10 +1079,10 @@ async function playVoice() {
           item.style.visibility = 'visible';
         });
         window.liveInk?.playSequence(items);
-        window.teacherFace?.media(player, profile);
+        window.dogTutor?.media(player, profile);
       };
       player.onpause = player.onwaiting = () => {
-        if (audio === player) window.teacherFace?.stop();
+        if (audio === player) window.dogTutor?.stop();
       };
       audio.onerror = () => { if (!request.signal.aborted) { stopVoice(); status('Could not play tutor audio.', true); } };
       await audio.play();
@@ -1061,17 +1092,21 @@ async function playVoice() {
       if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
         stopVoice(); status('Speech playback is unavailable in this browser.', true); return;
       }
-      localVoice ||= speechSynthesis.getVoices().find(voice => voice.lang === 'en-US');
+      const english = speechSynthesis.getVoices().filter(voice=>/^en(?:-|$)/i.test(voice.lang));
+      localVoice = english.find(voice=>/natural|neural|premium|enhanced/i.test(voice.name)) ||
+        english.find(voice=>/google|samantha|ava|aria|jenny/i.test(voice.name)) ||
+        english.find(voice=>!voice.localService) || english.find(voice=>voice.lang==='en-US') || english[0];
       const utterance = new SpeechSynthesisUtterance(narration);
       if (localVoice) utterance.voice = localVoice;
       utterance.lang = 'en-US';
-      utterance.rate = .97;
+      utterance.rate = style.speed;
+      utterance.pitch = style.pitch;
       utterance.onstart = () => {
         if (request.signal.aborted) return;
         beginWriting();
-        window.teacherFace?.speech();
+        window.dogTutor?.speech();
       };
-      utterance.onboundary = () => { if (!request.signal.aborted) window.teacherFace?.boundary(); };
+      utterance.onboundary = () => { if (!request.signal.aborted) window.dogTutor?.boundary(); };
       utterance.onend = nextCue;
       utterance.onerror = event => {
         if (request.signal.aborted) return;
@@ -1106,22 +1141,24 @@ async function playVoice() {
       } else {
       clip = provider === 'Gemini' ? await geminiVoice(narration, request.signal) :
         await (await api('audio/speech', {model:'gpt-4o-mini-tts', voice:'marin', input:narration.slice(0, 4000),
-          instructions:'Speak clearly like a patient teacher. Pause briefly after each main point.'}, request.signal)).blob();
+          instructions:style.description + ' Avoid robotic cadence. Use natural pauses and pronounce formulas in words.'}, request.signal)).blob();
       if (request.signal.aborted) return;
       audioUrl = URL.createObjectURL(clip);
       audio = new Audio(audioUrl);
       }
       const player = audio;
-      const profile = await window.teacherFace?.analyse(clip);
+      const profile = await window.dogTutor?.analyse(clip);
       if (request.signal.aborted) return;
-      player.playbackRate = profile?.rate || .97;
+      // Local synthesis already applies the chosen rate; avoid double slowing.
+      player.playbackRate = localGateway ? 1 : style.speed;
       player.preservesPitch = true;
       player.onended = async function onSegmentEnd() {
         if (request.signal.aborted) return;
         if (!localGateway || !remainingSpeech.length) return nextCue();
         const segment = remainingSpeech.shift();
         try {
-          const part = await (upcoming || localClip(segment));
+          const [part] = await Promise.all([upcoming || localClip(segment),
+            new Promise(resolve=>setTimeout(resolve,/[?]$/.test(segment.trim()) ? style.questionPause : style.pause))]);
           if (request.signal.aborted) return;
           upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
             (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
@@ -1130,9 +1167,11 @@ async function playVoice() {
           audioUrl = URL.createObjectURL(part);
           const nextPlayer = audio = new Audio(audioUrl);
           nextPlayer.onended = onSegmentEnd;
-          nextPlayer.onplaying = () => { if (!request.signal.aborted) window.teacherFace?.media(nextPlayer, null); };
+          const nextProfile = await window.dogTutor?.analyse(part);
+          if (request.signal.aborted) return;
+          nextPlayer.onplaying = () => { if (!request.signal.aborted) window.dogTutor?.media(nextPlayer, nextProfile); };
           nextPlayer.onpause = nextPlayer.onwaiting = () => {
-            if (audio === nextPlayer) window.teacherFace?.stop();
+            if (audio === nextPlayer) window.dogTutor?.stop();
           };
           nextPlayer.onerror = () => { if (!request.signal.aborted) { stopVoice(); status('Could not play the tutor audio.',true); } };
           await nextPlayer.play();
@@ -1140,13 +1179,14 @@ async function playVoice() {
           if (!request.signal.aborted) { stopVoice(); status(error.message,true); }
         }
       };
+      let writingStarted = false;
       player.onplaying = () => {
         if (request.signal.aborted) return;
-        beginWriting();
-        window.teacherFace?.media(player,profile);
+        if (!writingStarted) { beginWriting(); writingStarted = true; }
+        window.dogTutor?.media(player,profile);
       };
       player.onpause = player.onwaiting = () => {
-        if (audio === player) window.teacherFace?.stop();
+        if (audio === player) window.dogTutor?.stop();
       };
       audio.onerror = () => { if (!request.signal.aborted) { stopVoice(); status('Could not play the tutor audio.', true); } };
       await audio.play();
@@ -1493,7 +1533,7 @@ const jsonPrompt = [
   'For every step include an explanations array of strings, exactly one per board line in the same order. For each line give one or two short spoken sentences explaining why it is true or how to do it. Explain the operation or idea rather than merely repeating the line. Every line must have an explanation.',
   'Sketch relevant ideas as you teach. Include a drawings array indexed by board line. Each entry is an array of strokes or an empty array. Each stroke is {"points":[[x,y],...],"color":"teal","label":"optional short label"}. Coordinates use x from 0 to 100 and y from 0 to 40, measured from the top left. Points form straight segments, so repeat the first point to close a shape. Use teal or orange. Place labels at the final point. Use simple instructive sketches like areas, forces, timelines, or flows; explain what to look at in the matching spoken line.',
   'You are a patient one-on-one teacher. Use short whiteboard lines, intermediate reasoning and worked examples.',
-  'Write narration for the ear. Use natural contractions and short complete sentences. Say equations and units in plain spoken English. Use a new paragraph when moving from a question to its explanation. Keep symbolic notation on the board.',
+  'Write narration for the ear: warm, gentle, conversational, and clear. Use natural contractions, short complete sentences, one idea per sentence, and pronounce equations, acronyms and units in plain spoken words. Add paragraph breaks between ideas and before a worked example; never write stage directions or phonetic markup. Keep symbolic notation on the board.',
   'Teach with warm curiosity. Where it fits, invite the learner to predict what happens, give them a beat to think, then point out the detail on the board that explains the result. Let the discovery carry the enthusiasm.',
   'Speak like an experienced teacher working beside one learner. Stress the single idea that unlocks the problem, give an everyday comparison when helpful, and slow down for unfamiliar terms. Use gentle, confident enthusiasm and varied phrasing. For an interruption, address the exact question first with one short example.',
   'When a graph clarifies something, graph may be {"x":"axis label","y":"axis label","points":[[0,0],[1,1]]}. Points must be numeric.',
@@ -1543,7 +1583,7 @@ function parseLesson(data) {
 const generationInstructions = {
   first:'Begin a new lesson. Give the lesson its full title. Return exactly one self-contained opening step with 2 or 3 board lines. Leave questions empty. Further steps will be requested separately.',
   rest:'Continue the supplied lesson after the completed opening step. Return only the next 2 to 5 teaching steps, in order, and practice questions with answers. Do not repeat the opening step.',
-  question:'Provide 1 to 3 steps that answer the follow-up question.',
+  question:'Answer the exact follow-up immediately in the first board line and its narration. Prefer one step with 2 or 3 short board lines and one concrete example if useful; use a second step only when necessary for accuracy. Do not repeat the original lesson, add an introduction, or generate practice questions unless asked. Keep every line explanation to one or two spoken sentences; return valid lesson JSON.',
   full:'Provide 3 to 6 steps and practice questions with answers.',
   context:'Return a lesson-shaped JSON object whose relevance is one concise, concrete sentence connecting this topic to the learner profile. Include one minimal valid step because the response schema requires it.'
 };
@@ -1554,7 +1594,7 @@ async function teach(text, files, search, phase = 'full') {
   updateRequests();
   const timeoutSeconds = [freeLLM,localAuto].includes(provider) ? 180 : 60;
   const timer = setTimeout(() => controller.abort('timeout'),timeoutSeconds * 1000);
-  const options = {signal:controller.signal,instructions:jsonPrompt + ' ' + generationInstructions[phase],onBackup() {
+  const options = {signal:controller.signal,instructions:jsonPrompt + ' ' + generationInstructions[phase] + ' Narration style: ' + delivery().description,onBackup() {
     task.message = 'Trying backup provider';
     updateRequests();
   }};
@@ -1669,8 +1709,9 @@ async function customLesson(topic, files, search, options) {
         throw Error(failure?.error?.message || 'Local API fallback returned HTTP ' + response.status + '.');
       }
       if ([401,403].includes(response.status)) {
+        const failure = isFree && localGateway ? await response.json().catch(() => null) : null;
         throw Error(isFree && localGateway
-          ? 'FreeLLMAPI returned HTTP ' + response.status + '. Open API settings and select Test FreeLLMAPI key to check gateway authentication.'
+          ? (failure?.error?.message || 'FreeLLMAPI rejected the saved gateway key (HTTP ' + response.status + '). Test the key and save a current unified key.')
           : 'Gateway returned HTTP ' + response.status + '. Check your API key and its permissions.');
       }
       if (isFree && localGateway && response.status === 504) throw Error('FreeLLMAPI timed out before the model finished. Retry or change Model routing in API settings.');
@@ -1774,7 +1815,7 @@ async function geminiLesson(topic, files, search, options) {
 
 async function geminiVoice(narration, signal) {
   const candidate = await gemini('gemini-3.1-flash-tts-preview', {
-    contents:[{parts:[{text:'Read this lesson aloud as a patient teacher.\n' + narration}]}],
+    contents:[{parts:[{text:delivery().description + ' Speak naturally, not mechanically. Read only the lesson below.\n' + narration}]}],
     generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:'Kore'}}}}
   }, signal);
   const clip = candidate.content.parts.find(part => part.inlineData)?.inlineData;
@@ -1852,9 +1893,14 @@ $('ask').onsubmit = asyncAction(async run => {
   const version = boardVersion;
   pauseTeaching();
   const savedCue = cuePosition;
-  status('Preparing a follow-up…');
+  status('Professor Paws is thinking about your question…');
   const focus = boardCues(parent.steps[activeStep],activeStep === 0 ? parent.relevance : '')[savedCue];
-  const context = JSON.stringify({lesson:parent.title, selectedStep:parent.steps[activeStep], interruptedExplanation:focus?.text, previousQuestions:lessonTurns.slice(-5), question});
+  const selected = parent.steps[activeStep];
+  // Preserve the teaching context, but avoid sending bulky chalk path geometry.
+  const context = JSON.stringify({lesson:parent.title, selectedStep:{title:selected.title,lines:selected.lines,
+    explanations:selected.explanations,narration:selected.narration,graph:selected.graph,
+    illustrationCaption:selected.illustration?.caption}, interruptedExplanation:focus?.text,
+    previousQuestions:lessonTurns.slice(-3), question});
   const answer = await teach(context, [], false,'question');
   if (run !== operation || version !== boardVersion || parent !== current || !pausedForQuestion) return;
   const first = parent.steps.length;

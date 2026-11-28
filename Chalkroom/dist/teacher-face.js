@@ -1,30 +1,22 @@
 // Measure ten-millisecond energy windows. Their playback timestamps follow the
 // audio element even when playback slows down, stalls or changes rate.
-window.teacherFace = (() => {
-  const canvas = document.getElementById('teacher-lips');
-  const photo = document.getElementById('teacher-photo');
-  const ctx = canvas.getContext('2d');
-  let frame, lastOpening = 0, wordAt = 0;
+window.dogTutor = (() => {
+  const avatar = document.getElementById('dog-tutor');
+  const jaw = document.getElementById('dog-mouth');
+  const tongue = document.getElementById('dog-tongue');
+  let frame, lastOpening = -1, wordAt = 0;
   function mouth(opening) {
-    opening = Math.round(opening * 12);
-    if (!ctx || opening === lastOpening) return;
+    opening = Math.round(Math.max(0,Math.min(1,opening))*8);
+    if (!jaw || opening === lastOpening) return;
     lastOpening = opening;
-    ctx.clearRect(0,0,240,240);
-    if (!opening || !photo.naturalWidth) return;
-    // The smile slopes up toward the right. Keep both corners anchored and
-    // displace the existing lower lip and chin texture under each column.
-    for (let x=101; x<151; x++) {
-      const t = (x-101)/50;
-      const curve = Math.sin(Math.PI*t);
-      const seam = Math.round(120-6*t+4*curve);
-      const gap = opening*curve;
-      ctx.fillStyle = '#513722';
-      ctx.fillRect(x,seam,1,gap+1);
-      ctx.drawImage(photo,x,seam,1,18,x,seam+gap,1,18-gap);
-    }
+    jaw.setAttribute('ry',String(2.7+opening*.64));
+    jaw.setAttribute('cy',String(82+opening*.30));
+    tongue?.setAttribute('opacity',opening>2?'1':'0');
+    tongue?.setAttribute('cy',String(84+opening*.45));
   }
   function stop() {
     cancelAnimationFrame(frame);
+    avatar?.removeAttribute('data-speaking');
     mouth(0);
   }
   async function analyse(blob) {
@@ -66,12 +58,13 @@ window.teacherFace = (() => {
   function animate(read) {
     stop();
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    avatar?.setAttribute('data-speaking','true');
     let lastFrame = -Infinity;
     function tick(now) {
       if (now-lastFrame>=32) { mouth(read()); lastFrame=now; }
       frame=requestAnimationFrame(tick);
     }
-    tick();
+    frame=requestAnimationFrame(tick);
   }
   function media(player,profile) {
     animate(() => {
@@ -88,3 +81,6 @@ window.teacherFace = (() => {
   }
   return {analyse,media,speech,boundary,stop};
 })();
+
+// Keep compatibility with older lesson harnesses.
+window.teacherFace = window.dogTutor;

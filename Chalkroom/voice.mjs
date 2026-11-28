@@ -3,6 +3,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {voiceStyle} from './voice-styles.mjs';
 
 const binary = fileURLToPath(new URL('./.voice/piper/piper.exe',import.meta.url));
 const models = {
@@ -13,7 +14,8 @@ const models = {
 const sentences = new Intl.Segmenter('en-GB',{granularity:'sentence'});
 const operators = {'×':'times','÷':'divided by','=':'equals','≈':'is approximately equal to','≤':'is less than or equal to','≥':'is greater than or equal to','π':'pi','+':'plus','−':'minus'};
 
-export function speechPlan(text) {
+export function speechPlan(text,style='gentle') {
+  const preset=voiceStyle(style);
   const spoken = text.replace(/\be\.g\.(?=\s|$)/gi,'for example').replace(/\bi\.e\.(?=\s|$)/gi,'that is')
     .replace(/\bGHz\b/g,'gigahertz').replace(/\bMHz\b/g,'megahertz').replace(/\bkHz\b/g,'kilohertz')
     .replace(/(\d)\s*°\s*C\b/g,'$1 degrees Celsius').replace(/(\d)\s*°\s*F\b/g,'$1 degrees Fahrenheit')
@@ -33,27 +35,22 @@ export function speechPlan(text) {
     const lines = [...sentences.segment(paragraph.replace(/\s+/g,' ').trim())];
     for (const {segment} of lines) {
       const phrase = segment.trim();
-      if (phrase) plan.push({text:phrase,pause:/\?[”"’']?$/.test(phrase) ? 650 : 280});
+      if (phrase) plan.push({text:phrase,pause:/\?[”"’']?$/.test(phrase) ? preset.questionPause : preset.pause});
     }
-    if (plan.length) plan.at(-1).pause = Math.max(plan.at(-1).pause,600);
+    if (plan.length) plan.at(-1).pause = Math.max(plan.at(-1).pause,preset.questionPause);
   }
   if (plan.length) plan.at(-1).pause = 0;
   return plan;
 }
 
-export async function speak(text,signal,voice = 'cori') {
+export async function speak(text,signal,voice = 'cori',style='gentle') {
+  const preset=voiceStyle(style);
   const model = models[voice === 'storyteller' ? 'ryan' : voice];
-  const delivery = {
-    ryan:{lengthScale:'1.00',pause:250},
-    storyteller:{lengthScale:'1.055',pause:340},
-    cori:{lengthScale:'1.03',pause:285},
-    alan:{lengthScale:'1.01',pause:265}
-  }[voice];
   const dir = await mkdtemp(join(tmpdir(),'chalkroom-voice-'));
   try {
-    const phrases = speechPlan(text).map((phrase,i)=>({...phrase,file:join(dir,i+'.wav')}));
+    const phrases = speechPlan(text,style).map((phrase,i)=>({...phrase,file:join(dir,i+'.wav')}));
     await new Promise((resolve,reject)=>{
-      const child = spawn(binary,['--model',model,'--json-input','--output_dir',dir,'--length_scale',delivery.lengthScale,'--sentence_silence','0.05'],
+      const child = spawn(binary,['--model',model,'--json-input','--output_dir',dir,'--length_scale',String(preset.localScale),'--sentence_silence','0.10'],
         {windowsHide:true,signal,stdio:['pipe','ignore','ignore']});
       let failure;
       child.on('error',error=>{failure=error;});
@@ -69,11 +66,11 @@ export async function speak(text,signal,voice = 'cori') {
       if (wav.toString('ascii',36,40)!=='data' || wav.readUInt32LE(24)!==22050) throw Error('Unexpected voice audio format');
       header ||= Buffer.from(wav.subarray(0,44));
       // Match the reference's shorter statement breaks and longer question rests.
-      const pause = phrase.pause === 280 ? Math.max(260,delivery.pause) : Math.min(510,phrase.pause);
+      const pause = phrase.pause;
       parts.push(wav.subarray(44),Buffer.alloc(2*Math.round(22050*pause/1000)));
     }
     const pcm = Buffer.concat(parts);
-    if (voice === 'storyteller') {
+    if (voice === 'storyteller' || style === 'gentle') {
       // Gentle bass emphasis and treble roll-off keep consonants audible.
       const bassMix = 1-Math.exp(-2*Math.PI*220/22050);
       const presenceMix = 1-Math.exp(-2*Math.PI*4200/22050);
@@ -82,7 +79,7 @@ export async function speak(text,signal,voice = 'cori') {
         const input = pcm.readInt16LE(offset);
         bass += bassMix*(input-bass);
         presence += presenceMix*(input-presence);
-        const output = Math.round(.75*input + .18*presence + .14*bass);
+        const output = Math.round(.83*input + .12*presence + .06*bass);
         pcm.writeInt16LE(Math.max(-32768,Math.min(32767,output)),offset);
       }
     }

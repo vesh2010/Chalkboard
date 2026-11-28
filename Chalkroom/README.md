@@ -147,3 +147,11 @@ Start `local.mjs` and any separate local gateway used by an API slot. A browser 
 ## License
 
 No open-source license has been selected yet. Add a `LICENSE` file before allowing reuse or redistribution.
+
+## Professor Paws — Batch 1
+
+Professor Paws is a vector golden-retriever tutor with audio-driven mouth movement, a gentle nod, blinking and ear motion. Reduced-motion settings are respected. Open the lesson outline (☰) to choose Gentle teacher, Clear explainer, Storytelling guide, or Exam coach. The voice engine is independent of the lesson AI provider.
+
+The new default Auto voice uses ElevenLabs when both `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` exist in the local `.env`; otherwise it uses the installed Cori neural Piper model. If a configured ElevenLabs request fails, the app reports the error rather than silently changing voices. Local and browser voice quality depends on the installed model or device. No cloud voice credentials are included. Voice style and engine choices persist in the browser. Existing prerecorded sample audio is unchanged.
+
+Long local narration uses sentence-aware prefetch and playback. Follow-up questions ask for the direct answer first and omit bulky SVG path data from the context. FreeLLMAPI now keeps its extended primary timeout when there are no backup providers, with authentication failover when backups are available.
