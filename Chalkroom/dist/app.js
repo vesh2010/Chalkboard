@@ -31,6 +31,27 @@ let key = '';
 const localGateway = Boolean(document.head?.querySelector('meta[name="chalkroom-local-gateway"]'));
 const voiceStyles = window.chalkVoiceStyles;
 const learning = window.chalkLearning;
+const pawgress=window.chalkPawgress;
+let activeTutor=pawgress.tutorId(read('tutor','paws'));
+let progressData=pawgress.clean(read('pawgress',{}));
+let sessionSteps=new Set();
+let sessionFinished=false;
+function tutor(){return pawgress.tutor(activeTutor);}
+function applyTutor(){
+  const t=tutor();
+  const avatar=$('dog-tutor');
+  avatar.dataset.tutor=activeTutor;
+  avatar.setAttribute('aria-label',t.name+', '+t.breed+' tutor');
+  for(const [name,value] of Object.entries({fur:t.fur,shade:t.shade,ear:t.ear,earLight:t.earLight,background:t.background,dark:t.dark}))avatar.style.setProperty('--tutor-'+name,value);
+  $('dog-name').textContent=t.name;
+  $('home-tutor').textContent='LEARN WITH '+t.name.toUpperCase();
+}
+applyTutor();
+function renderPawgressHome(){
+  const s=pawgress.stats(progressData);
+  $('home-progress').textContent=s.streak+' day'+(s.streak===1?'':'s')+' study streak · '+s.completed+' completed lesson'+(s.completed===1?'':'s');
+}
+renderPawgressHome();
 let studyPreferences=learning.preferences(read('studyPreferences',{}));
 function updateStudyPreferences(value) {
   studyPreferences=learning.preferences(value);
@@ -53,6 +74,13 @@ let voiceStyle = Object.hasOwn(voiceStyles,savedStyle) ? savedStyle : 'gentle';
 const savedNarrator = read('narratorV2','auto');
 let narrator = ['auto','ryan','alan','cori','storyteller','elevenlabs'].includes(savedNarrator) ? savedNarrator : 'auto';
 function delivery() { return voiceStyles[voiceStyle]; }
+function chooseTutor(id,matchVoice=true){
+  activeTutor=pawgress.tutorId(id);persist('tutor',activeTutor);applyTutor();
+  if(matchVoice&&voiceStyle!==tutor().style){
+    voiceStyle=tutor().style;persist('voiceStyle',voiceStyle);$('voice-style').value=voiceStyle;
+    voicePreferenceChanged();
+  }
+}
 function voicePreferenceChanged() {
   const playing = Boolean(voiceRequest || localSpeechActive);
   if (playing) { pauseTeaching(); playVoice(); }
@@ -510,6 +538,7 @@ function editProfile() {
     updateStudyPreferences({mode:data.get('mode'),pace:data.get('pace'),difficulty:data.get('difficulty'),search:data.get('searchDefault')==='yes'});
     voiceStyle=Object.hasOwn(voiceStyles,data.get('voiceStyle'))?data.get('voiceStyle'):'gentle';
     narrator=data.get('voiceEngine')||narrator;
+    chooseTutor(data.get('tutor'),false);
     persist('voiceStyle',voiceStyle);persist('narratorV2',narrator);
     $('voice-style').value=voiceStyle;if($('voice-engine'))$('voice-engine').value=narrator;
     if(audioChanged)voicePreferenceChanged();
@@ -524,12 +553,13 @@ function editProfile() {
   preferenceSelect(root,'Default learning mode','mode',Object.entries(learning.modes).map(([id,m])=>[id,m.label]),studyPreferences.mode);
   preferenceSelect(root,'Narration pace','pace',[['slow','Slow · 0.85×'],['normal','Normal · 1×'],['fast','Fast · 1.15×']],studyPreferences.pace);
   preferenceSelect(root,'Practice difficulty','difficulty',[['auto','Match learning mode'],['easy','Easy'],['medium','Medium'],['challenge','Challenge']],studyPreferences.difficulty);
+  preferenceSelect(root,'Dog tutor','tutor',Object.entries(pawgress.tutors).map(([id,t])=>[id,t.name+' · '+t.breed]),activeTutor);
   preferenceSelect(root,'Voice style','voiceStyle',Object.entries(voiceStyles).map(([id,s])=>[id,s.label]),voiceStyle);
   if(localGateway) preferenceSelect(root,'Voice engine','voiceEngine',[['auto','Auto · ElevenLabs if configured'],['elevenlabs','ElevenLabs'],['cori','Cori'],['storyteller','Ryan storyteller'],['ryan','Ryan'],['alan','Alan']],narrator);
   preferenceSelect(root,'Search the web by default','searchDefault',[['yes','On'],['no','Off']],studyPreferences.search?'yes':'no');
   const reset=make('button','Reset study preferences');reset.type='button';
   reset.onclick=()=>{
-    for(const [name,value] of Object.entries({mode:'beginner',pace:'normal',difficulty:'auto',voiceStyle:'gentle',voiceEngine:'auto',searchDefault:'yes'})){
+    for(const [name,value] of Object.entries({mode:'beginner',pace:'normal',difficulty:'auto',voiceStyle:'gentle',voiceEngine:'auto',searchDefault:'yes',tutor:'paws'})){
       const control=root.querySelector('[name="'+name+'"]');if(control)control.value=value;
     }
   };
@@ -559,6 +589,7 @@ function newLesson() {
   operation++;
   stopVoice();
   current = null;
+  sessionSteps=new Set();sessionFinished=false;
   practiceEpoch++;
   window.dogTutor?.setMood('idle');
   $('lesson').hidden = true;
@@ -574,6 +605,7 @@ function openLesson(item, autoplay = false) {
   stopVoice();
   closePanels();
   current = item;
+  sessionSteps=new Set();sessionFinished=false;
   current.learningMode=learning.preferences({mode:item.learningMode||studyPreferences.mode}).mode;
   practiceEpoch++;
   practiceLevel=studyPreferences.difficulty==='auto'?learning.modes[learning.preferences({mode:item.learningMode||studyPreferences.mode}).mode].difficulty:studyPreferences.difficulty;
@@ -1099,6 +1131,7 @@ async function playVoice() {
   if (!current) return;
   if (voiceRequest || localSpeechActive) { pauseTeaching(); return; }
   if (!$('quiz').hidden) { $('quiz').hidden=true; practiceEpoch++; }
+  $('session-recap').hidden=true;
   cancelStepWait();
   pausedForQuestion = false;
   const step = current.steps[stepIndex];
@@ -1165,6 +1198,7 @@ async function playVoice() {
     }
     const cue = cues[index];
     if (!cue) {
+      if(!returnPoints.length&&!singleLine)recordStudyStep(stepIndex);
       cuePosition=index;
       stopVoice();
       const back = returnPoints.at(-1);
@@ -1174,7 +1208,7 @@ async function playVoice() {
         showStep(back.step,true,back.cue,true,back.position);
       } else if (stepIndex + 1 < (back ? back.lastAnswer + 1 : current.mainStepCount ?? current.steps.length)) {
         showStep(stepIndex + 1,true,0,true);
-      } else if (!waitingForMoreSteps()) { cuePosition = 0; status('Lesson complete. You can replay a step or ask a question.'); }
+      } else if (!waitingForMoreSteps()) { cuePosition = 0; finishStudy(); }
       return;
     }
     linePlayed = true;
@@ -1224,12 +1258,13 @@ async function playVoice() {
         if (player.currentTime >= end) {
           player.removeEventListener('timeupdate', onTime);
           player.pause();
+          recordStudyStep(stepIndex);
           stopVoice();
           if (stepIndex + 1 < (current.mainStepCount ?? current.steps.length)) {
             showStep(stepIndex + 1, true, 0, true);
           } else {
             cuePosition = 0;
-            status('Lesson complete. You can replay a step or ask a question.');
+            finishStudy();
           }
         }
       };
@@ -1237,12 +1272,13 @@ async function playVoice() {
       player.onended = () => {
         if (request.signal.aborted) return;
         player.removeEventListener('timeupdate', onTime);
+        recordStudyStep(stepIndex);
         stopVoice();
         if (stepIndex + 1 < (current.mainStepCount ?? current.steps.length)) {
           showStep(stepIndex + 1, true, 0, true);
         } else {
           cuePosition = 0;
-          status('Lesson complete. You can replay a step or ask a question.');
+          finishStudy();
         }
       };
       player.onplaying = () => {
@@ -1415,7 +1451,7 @@ $('question').oninput = () => { $('question').onfocus(); micSession?.edit?.(); }
 function closePanels() {
   micSession?.cancelDraft?.(true);
   if (!$('quiz').hidden) practiceEpoch++;
-  $('ask').hidden = $('lesson-panel').hidden = $('quiz').hidden = true;
+  $('ask').hidden = $('lesson-panel').hidden = $('quiz').hidden = $('session-recap').hidden = true;
   $('panel-toggle').setAttribute('aria-expanded','false');
 }
 $('panel-toggle').onclick = () => {
@@ -1731,7 +1767,7 @@ const jsonPrompt = [
   'Sketch relevant ideas as you teach. Include a drawings array indexed by board line. Each entry is an array of strokes or an empty array. Each stroke is {"points":[[x,y],...],"color":"teal","label":"optional short label"}. Coordinates use x from 0 to 100 and y from 0 to 40, measured from the top left. Points form straight segments, so repeat the first point to close a shape. Use teal or orange. Place labels at the final point. Use simple instructive sketches like areas, forces, timelines, or flows; explain what to look at in the matching spoken line.',
   'You are a patient one-on-one teacher. Use short whiteboard lines, intermediate reasoning and worked examples.',
   'Write narration for the ear: warm, gentle, conversational, and clear. Use natural contractions, short complete sentences, one idea per sentence, and pronounce equations, acronyms and units in plain spoken words. Add paragraph breaks between ideas and before a worked example; never write stage directions or phonetic markup. Keep symbolic notation on the board.',
-  'You are Professor Paws, a warm, thoughtful dog tutor. Use occasional brief, sincere encouragement and light dog-themed wordplay at most once per lesson, never at the expense of clarity. No barking, baby talk, repetitive praise, or invented claims about the learner. Invite predictions when helpful; make mistakes feel like useful information, not failures.',
+  'You are a warm, thoughtful dog tutor. Use occasional brief, sincere encouragement and light dog-themed wordplay at most once per lesson, never at the expense of clarity. No barking, baby talk, repetitive praise, or invented claims about the learner. Invite predictions when helpful; make mistakes feel like useful information, not failures.',
   'Speak like an experienced teacher working beside one learner. Stress the single idea that unlocks the problem, give an everyday comparison when helpful, and slow down for unfamiliar terms. Use gentle, confident enthusiasm and varied phrasing. For an interruption, address the exact question first with one short example.',
   'For each teaching step, optionally include up to three conceptCards with {type:"definition|formula|rule|example|mistake|takeaway",title:"short title",content:"one clear point",note:"optional explanation"}. Only use facts already taught in the step. For formulas define symbols and units in the note. Do not include cards for placeholder practice steps.',
   'When a graph clarifies something, graph may be {"x":"axis label","y":"axis label","points":[[0,0],[1,1]]}. Points must be numeric.',
@@ -1790,12 +1826,12 @@ const generationInstructions = {
 async function teach(text, files, search, phase = 'full', mode = current?.learningMode || studyPreferences.mode) {
   mode=learning.preferences({mode}).mode;
   const controller = new AbortController();
-  const task = {controller,phase,message:phase === 'rest' ? 'Preparing later steps…' : phase.startsWith('practice_')?'Preparing practice questions…':'Professor Paws is thinking…'};
+  const task = {controller,phase,message:phase === 'rest' ? 'Preparing later steps…' : phase.startsWith('practice_')?'Preparing practice questions…':tutor().name+' is thinking…'};
   lessonRequests.add(task);
   updateRequests();
   const timeoutSeconds = [freeLLM,localAuto].includes(provider) ? 180 : 60;
   const timer = setTimeout(() => controller.abort('timeout'),timeoutSeconds * 1000);
-  const options = {signal:controller.signal,instructions:jsonPrompt + ' ' + generationInstructions[phase] + ' Learning mode: ' + learning.modes[mode].description + ' Narration style: ' + delivery().description,onBackup() {
+  const options = {signal:controller.signal,instructions:jsonPrompt + ' ' + generationInstructions[phase] + ' Learning mode: ' + learning.modes[mode].description + ' Tutor character: '+tutor().name+'. '+tutor().personality+' Narration style: ' + delivery().description,onBackup() {
     task.message = 'Trying backup provider';
     updateRequests();
   }};
@@ -2047,6 +2083,8 @@ async function loadLaterSteps(task,topic,files,search) {
     current.steps.splice(first,0,...remainder.steps);
     const count = remainder.steps.length;
     current.mainStepCount += count;
+    current.continuationPending=false;
+    sessionFinished=false;
     if (stepIndex >= first) stepIndex += count;
     for (const point of returnPoints) {
       if (point.step >= first) point.step += count;
@@ -2088,6 +2126,7 @@ $('start').onsubmit = asyncAction(async (run,payload) => {
   lesson.id = crypto.randomUUID();
   lesson.steps = lesson.steps.slice(0,1);
   lesson.mainStepCount = 1;
+  lesson.continuationPending=true;
   saveLesson(lesson);
   openLesson(lesson);
   status(lesson.fallbackSlot ? 'First step generated using API ' + lesson.fallbackSlot + '.' : '');
@@ -2105,7 +2144,7 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
   pauseTeaching();
   const savedCue = cuePosition;
   const savedPlayback=resumePoint;
-  status('Professor Paws is thinking about your question…');
+  status(tutor().name+' is thinking about your question…');
   window.dogTutor?.setMood('thinking');
   const focus = boardCues(parent.steps[activeStep],activeStep === 0 ? parent.relevance : '')[savedCue];
   const selected = parent.steps[activeStep];
@@ -2118,7 +2157,7 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
   if (run !== operation || version !== boardVersion || parent !== current || !pausedForQuestion) return;
   const first = parent.steps.length;
   lessonTurns = [...lessonTurns, question];
-  current = {...parent, id:parent.id || crypto.randomUUID(), demo:false, turns:lessonTurns, mainStepCount:parent.mainStepCount ?? first,
+  current = {...parent, id:parent.id || crypto.randomUUID(), progressId:studyId(parent), demo:false, turns:lessonTurns, mainStepCount:parent.mainStepCount ?? first,
     steps:[...parent.steps, ...answer.steps], questions:[...parent.questions, ...answer.questions]};
   $('lesson-mode').textContent = 'TUTOR SESSION · '+learning.modes[learning.preferences({mode:current.learningMode}).mode].label.toUpperCase();
   saveLesson(current);
@@ -2128,6 +2167,135 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
   showStep(first, true,0,true);
   status();
 },()=>({question:$('question').value.trim(),parent:current,step:current?.steps[stepIndex],version:boardVersion}),p=>Boolean(p?.parent&&current===p.parent&&current.steps[stepIndex]===p.step&&boardVersion===p.version),'Retry original question');
+function studyId(lesson=current){
+  if(!lesson)return null;
+  return lesson.progressId||lesson.id|| (lesson===sample?'sample-compound-interest':lesson.demo?'demo:'+String(lesson.title).slice(0,120):null);
+}
+function recordProgress(event){
+  const id=studyId();if(!id)return;
+  progressData=pawgress.record(progressData,{id,title:current.title,...event});
+  persist('pawgress',progressData);renderPawgressHome();
+}
+function recordStudyStep(index){
+  if(!current||returnPoints.length||index<0||index>=(current.mainStepCount??current.steps.length))return;
+  sessionSteps.add(index);recordProgress({kind:'step',step:index});
+}
+function recordPractice(question,value){
+  recordProgress({kind:'review',question,correct:value==='got'});
+}
+function finishStudy(){
+  const id=studyId();
+  const complete=pawgress.canComplete(current,progressData.lessons[id]);
+  if(complete)recordProgress({kind:'complete'});
+  status(current?.continuationPending?'Opening step finished. Remaining lesson is not ready yet.':complete?'Lesson complete. Your session recap is ready.':'End of lesson reached. Review the other steps to complete it.');
+  if(!sessionFinished){sessionFinished=true;showRecap(false);}
+}
+function showRecap(pause=true){
+  if(!current)return;
+  if(pause&&(voiceRequest||localSpeechActive))pauseTeaching();
+  closePanels();
+  const panel=$('session-recap');panel.hidden=false;
+  const summary=pawgress.recap(current,progressData.lessons[studyId()],sessionSteps,practiceAttempts,learning);
+  const head=make('div');head.className='practice-head';
+  const close=make('button','Close');close.type='button';close.onclick=()=>{panel.hidden=true;$('voice').focus();};
+  head.append(make('h2','Your session recap'),close);
+  panel.replaceChildren(head,make('strong',summary.title),make('p',summary.covered+' of '+summary.total+' steps completed this visit · '+summary.reviewed+' practice answers reviewed ('+summary.correct+' self-checked correct).'));
+  if(current.continuationPending)panel.append(make('p','This lesson is incomplete; more steps are still pending.'));
+  function section(title,items,empty){
+    panel.append(make('h3',title));
+    if(!items.length){panel.append(make('p',empty));return;}
+    const list=make('ul');for(const item of items)list.append(make('li',item));panel.append(list);
+  }
+  section(summary.covered?'Key points from completed steps':'Key points to review',summary.points,'No board points available yet.');
+  section('Common mistakes to watch for',summary.mistakes,'No specific mistake cards were included in these steps. Revisit the worked examples.');
+  panel.append(make('h3','Quick revision quiz'));
+  for(const question of summary.questions.slice(0,3)){
+    const details=make('details');details.append(make('summary',question.prompt),make('p',question.answer));panel.append(details);
+  }
+  if(!summary.questions.length)panel.append(make('p','No practice questions are available yet.'));
+  const practice=make('button','Open practice');practice.type='button';practice.onclick=()=>{panel.hidden=true;$('practice').click();};
+  const copy=make('button','Copy recap');copy.type='button';copy.onclick=async()=>{
+    const text=[summary.title,'Key points:',...summary.points,'Common mistakes:',...summary.mistakes,'Revision questions:',...summary.questions.slice(0,3).map(q=>q.prompt+' — '+q.answer)].join('\n');
+    try{await navigator.clipboard.writeText(text);copy.textContent='Copied';}catch{copy.textContent='Select recap text to copy';}
+  };
+  const actions=make('div');actions.className='recap-actions';actions.append(practice,copy);panel.append(actions);
+}
+function showPawgress(){
+  if(voiceRequest||localSpeechActive)pauseTeaching();
+  const root=modal('Your Pawgress');
+  const stats=pawgress.stats(progressData);
+  root.append(make('p','Your study activity stays in this browser. A study day counts when you complete a teaching step or review a practice answer. No activity is recorded just for opening the app.'));
+  const grid=make('div');grid.className='pawgress-grid';
+  for(const [label,value] of [['Day streak',stats.streak],['Study days',stats.days],['Lessons completed',stats.completed],['Teaching steps',stats.steps],['Answers reviewed',stats.reviewed],['Self-checked correct',stats.correct]]){
+    const cell=make('div');cell.append(make('strong',String(value)),make('small',label));grid.append(cell);
+  }
+  root.append(grid,make('h3','Achievement badges'));
+  for(const badge of stats.badges){const row=make('div',(badge.earned?'★ ':'○ ')+badge.name);row.className='pawgress-badge';row.dataset.earned=String(badge.earned);root.append(row);}
+  root.append(make('h3','Recent topics'));
+  const topics=Object.values(progressData.lessons).sort((a,b)=>b.lastStudied.localeCompare(a.lastStudied)).slice(0,10);
+  if(!topics.length)root.append(make('p','Complete a step to start your learning trail.'));
+  for(const item of topics)root.append(make('p',item.title+' · '+(item.complete?'Completed':item.steps.length+' steps completed')));
+  const reset=make('button','Reset Pawgress');reset.type='button';reset.onclick=()=>{
+    if(!window.confirm('Reset all local study statistics and badges? Saved lessons and preferences will stay.'))return;
+    progressData=pawgress.clean({});sessionSteps=new Set();sessionFinished=false;persist('pawgress',progressData);renderPawgressHome();$('modal').close();
+  };root.append(reset);
+}
+function tutorPicker(root,initial,onChange){
+  const group=make('fieldset');group.className='tutor-picker';group.append(make('legend','Choose your learning companion'));
+  for(const [id,t] of Object.entries(pawgress.tutors)){
+    const label=make('label');label.className='tutor-option';
+    const input=make('input');input.type='radio';input.name='tutor';input.value=id;input.checked=initial===id;
+    const icon=make('span');icon.className='tutor-symbol';icon.style.background=t.dark;icon.setAttribute('aria-hidden','true');
+    // Reuse the actual vector artwork for each choice without duplicate DOM ids.
+    const preview=$('dog-tutor').cloneNode(true);
+    const ids=new Map();
+    for(const node of [preview,...preview.querySelectorAll('[id]')]){
+      if(node.id){const previous=node.id;node.id='preview-'+id+'-'+previous;ids.set(previous,node.id);}
+    }
+    for(const node of preview.querySelectorAll('*'))for(const attr of ['fill','stroke','clip-path','mask','filter']){
+      const value=node.getAttribute(attr);
+      if(value){const replacement=value.replace(/url\(#([^)]*)\)/g,(whole,key)=>ids.has(key)?'url(#'+ids.get(key)+')':whole);if(replacement!==value)node.setAttribute(attr,replacement);}
+    }
+    preview.dataset.tutor=id;preview.removeAttribute('data-speaking');preview.removeAttribute('data-mood');preview.removeAttribute('role');preview.setAttribute('aria-hidden','true');
+    for(const [name,value] of Object.entries({fur:t.fur,shade:t.shade,ear:t.ear,earLight:t.earLight,background:t.background,dark:t.dark}))preview.style.setProperty('--tutor-'+name,value);
+    icon.append(preview);
+    const info=make('span');info.append(make('strong',t.name),make('small',t.breed+' · '+t.description));
+    label.append(input,icon,info);group.append(label);
+    input.onchange=()=>{if(input.checked)onChange?.(id);};
+  }
+  root.append(group);
+}
+function showTutorPicker(){
+  const root=modal('Meet the dog tutors',data=>{
+    chooseTutor(data.get('tutor'),data.has('matchVoice'));
+    status(tutor().name+' is ready to teach.');
+  });
+  tutorPicker(root,activeTutor);
+  const label=make('label','Use this tutor’s recommended voice style '),input=make('input');input.type='checkbox';input.name='matchVoice';input.checked=true;label.append(input);root.append(label);
+  root.append(make('p','All characters share your configured voice engine. Their recommended delivery styles differ; you can override the style in Study preferences.'));
+}
+function showOnboarding(){
+  const root=modal('Welcome to Chalkroom',data=>{
+    chooseTutor(data.get('tutor'),false);
+    voiceStyle=Object.hasOwn(voiceStyles,data.get('voiceStyle'))?data.get('voiceStyle'):tutor().style;
+    persist('voiceStyle',voiceStyle);$('voice-style').value=voiceStyle;
+    updateStudyPreferences({...studyPreferences,mode:data.get('mode'),pace:data.get('pace')});
+    const goal=String(data.get('goal')||'').trim();
+    if(goal){profile={...profile,goal};persist('profile',profile);}
+    persist('onboarded',true);voicePreferenceChanged();status('Welcome! Try a sample lesson or enter a topic.');
+  });
+  tutorPicker(root,activeTutor,id=>{voiceSelect.value=pawgress.tutor(id).style;});
+  const voiceSelect=preferenceSelect(root,'Voice style','voiceStyle',Object.entries(voiceStyles).map(([id,v])=>[id,v.label]),voiceStyle);
+  field(root,'What would you like to learn or achieve? (optional)','goal',profile.goal);
+  preferenceSelect(root,'Learning mode','mode',Object.entries(learning.modes).map(([id,m])=>[id,m.label]),studyPreferences.mode);
+  preferenceSelect(root,'Study pace','pace',[['slow','Slow'],['normal','Normal'],['fast','Fast']],studyPreferences.pace);
+  const skip=make('button','Skip for now');skip.type='button';skip.onclick=()=>{persist('onboarded',true);$('modal').close();};root.append(skip);
+  const dialog=$('modal');
+  dialog.addEventListener('close',()=>persist('onboarded',true),{once:true});
+}
+$('recap-open').onclick=()=>showRecap();
+$('pawgress').onclick=$('home-progress-open').onclick=$('lesson-progress').onclick=showPawgress;
+$('choose-tutor').onclick=$('lesson-tutor').onclick=showTutorPicker;
 function renderPractice() {
   const panel=$('quiz');
   if (!current || panel.hidden) return;
@@ -2137,7 +2305,7 @@ function renderPractice() {
   const head=make('div'); head.className='practice-head';
   const close=make('button','Close'); close.type='button';
   close.onclick=()=>{panel.hidden=true;practiceEpoch++;window.dogTutor?.setMood('listening');$('voice').focus();};
-  head.append(make('h2','Practice with Paws'),close);
+  head.append(make('h2','Practice with '+tutor().name),close);
   const levels=make('div');levels.className='practice-levels';levels.setAttribute('role','group');levels.setAttribute('aria-label','Practice difficulty');
   const available=all.some(q=>q.difficulty==='review')?[...learning.levels,'review']:learning.levels;
   const labels={easy:'Easy',medium:'Medium',challenge:'Challenge',review:'Saved review'};
@@ -2177,7 +2345,7 @@ function renderPractice() {
       got.setAttribute('aria-pressed',String(value==='got'));retry.setAttribute('aria-pressed',String(value==='retry'));
       result.textContent=value==='got'?'Nice work — keep it up.':value==='retry'?'Review the reasoning and try again.':'';
     }
-    function assess(value){practiceAttempts.set(id,value);update();refreshProgress();window.dogTutor?.setMood(value==='got'?'happy':'encourage',3200);}
+    function assess(value){practiceAttempts.set(id,value);recordPractice(id,value);update();refreshProgress();window.dogTutor?.setMood(value==='got'?'happy':'encourage',3200);}
     got.onclick=()=>assess('got');retry.onclick=()=>assess('retry');
     actions.append(got,retry);solution.append(actions,result);solution.open=practiceAttempts.has(id);update();
     solution.addEventListener('toggle',()=>{if(solution.open&&!practiceAttempts.has(id)) window.dogTutor?.setMood('insight',2200);});
@@ -2259,3 +2427,8 @@ document.querySelectorAll('[data-topic]').forEach(button => {
 lessonButtons($('recent'), history.slice(0, 6));
 updateConnection();
 $('cancel-request').onclick = () => visibleRequest()?.controller.abort('cancelled');
+if(!read('onboarded',false)){
+  // Existing learners keep all preferences; onboarding is optional and prefilled.
+  setTimeout(()=>{if(!$('modal').open&&!current)showOnboarding();},0);
+}
+
