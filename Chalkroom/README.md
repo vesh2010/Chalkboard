@@ -181,3 +181,7 @@ Session recap is available from the lesson menu and when playback reaches the en
 First-run onboarding is optional and prefilled with existing settings. Choose a tutor, recommended voice style (or override it), goal, mode and pace, or skip. Preferences can be changed later. Existing prerecorded sample narration is not regenerated.
 
 Pawgress retains up to 730 study dates, 500 lesson records and 2,000 reviewed question identifiers in local browser storage to keep storage bounded. The most recent topic list uses the last recorded activity time. The tutor chooser uses previews of the actual vector character artwork.
+
+## API regression and live smoke tests
+
+Run `node --test tests/api-regression.test.mjs` from Chalkroom with Node 22+. The regression suite exercises the actual lesson adapters and router against deterministic mocked responses; it does not call paid APIs. Run the local app, then `node tests/live-api-smoke.mjs --auto` for configured .env fallback providers, or set `CHALKROOM_TEST_KEY` privately in your terminal and run `node tests/live-api-smoke.mjs` for FreeLLMAPI. The live script asks before sending six requests and may use credits. It checks response structure, not factual teaching quality or audio.
