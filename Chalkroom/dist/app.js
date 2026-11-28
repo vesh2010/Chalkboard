@@ -19,7 +19,11 @@ const sample = {
     {title:'Work an example', explanations:['Imagine depositing one hundred dollars and earning ten percent each year.','Ten percent of one hundred is ten. Add that to the deposit to get one hundred and ten dollars.','This time the ten percent earns eleven dollars, because the balance has grown. That brings it to one hundred and twenty-one.','In year three, the interest is twelve dollars and ten cents. Adding it gives a balance of one hundred thirty-three dollars and ten cents.'], lines:['Start with $100 at 10% per year.', 'Year 1: $100 × 1.10 = $110', 'Year 2: $110 × 1.10 = $121', 'Year 3: $121 × 1.10 = $133.10'], narration:'Start with one hundred dollars. Multiply by one point one each year. At the end of year three, you have one hundred thirty-three dollars and ten cents.', graph:{x:'Year', y:'Balance ($)', points:[[0,100],[1,110],[2,121],[3,133.1]]}},
     {title:'Generalize it', explanations:['Multiply the starting amount by one plus the rate once for every period. The exponent is shorthand for those repeated multiplications.','Count how many times interest gets added. With annual compounding for three years, that count is three.','Use the rate for one period. If each period is a month, use the monthly rate.'], lines:['Balance = principal × (1 + rate)ⁿ', 'n is the number of compounding periods.', 'Match the rate to the period.'], narration:'The balance equals the principal times one plus the rate, raised to the number of periods. Make sure the interest rate and the number of periods use the same time unit.'}
   ],
-  questions:[{prompt:'What would $100 become after two years at 20% per year?', answer:'$144. Multiply by 1.20 twice.'}]
+  questions:[
+    {difficulty:'easy',prompt:'What would $100 become after two years at 20% per year?',answer:'$144. Multiply by 1.20 twice.',hint:'Apply the multiplier to the new balance each year.'},
+    {difficulty:'medium',prompt:'You save $500 at 5% annual compound interest. What is the balance after three years?',answer:'$578.81, rounded to cents. Calculate 500 × 1.05³ = 578.8125.',hint:'Use the annual multiplier three times.'},
+    {difficulty:'challenge',prompt:'Compare $1,000 at 6% simple interest and 6% compounded annually for five years. How much extra does compounding earn?',answer:'$38.23 extra. Simple interest gives $1,300; compounding gives 1,000 × 1.06⁵ = $1,338.23.',hint:'Subtract the simple-interest balance from the compound-interest balance.'}
+  ]
 };
 let profile = read('profile', {});
 let history = read('history', []);
@@ -92,6 +96,7 @@ function updateRequests() {
   const task = visibleRequest();
   $('request-controls').hidden = $('cancel-request').hidden = !task;
   $('request-progress').textContent = task?.message || '';
+  if (task?.phase !== 'rest' && task && !voiceRequest && !localSpeechActive) window.dogTutor?.setMood('thinking');
 }
 function cancelLessonRequests() {
   continuation = undefined;
@@ -138,6 +143,13 @@ let busy = false;
 let audio;
 let audioUrl;
 let voiceRequest;
+let playbackPoint = null;
+let resumePoint = null;
+const learning = window.chalkLearning;
+let practiceLevel = 'easy';
+let practiceAttempts = new Map();
+let practiceDrafts = new Map();
+let practiceEpoch = 0;
 
 let operation = 0;
 let localVoice;
@@ -147,6 +159,8 @@ let lessonTurns = [];
 function status(message = '', error = false) {
   $('status').textContent = message;
   $('status').dataset.error = error;
+  if (error) window.dogTutor?.setMood('encourage');
+  else if (/Lesson complete/.test(message)) window.dogTutor?.setMood('happy',3500);
 }
 function updateConnection() {
   $('connection').textContent = provider === localAuto ? localAuto : key ? provider + ' · Key saved' : 'Demo mode';
@@ -462,6 +476,8 @@ function newLesson() {
   operation++;
   stopVoice();
   current = null;
+  practiceEpoch++;
+  window.dogTutor?.setMood('idle');
   $('lesson').hidden = true;
   $('home').hidden = false;
   status();
@@ -474,6 +490,10 @@ function openLesson(item, autoplay = false) {
   stopVoice();
   closePanels();
   current = item;
+  practiceEpoch++;
+  practiceLevel='easy';
+  practiceAttempts=new Map();
+  practiceDrafts=new Map();
   lessonTurns = item.turns || [];
   $('home').hidden = true;
   $('lesson').hidden = false;
@@ -516,15 +536,16 @@ function graph(data) {
   const xs = points.map(point => point[0]), ys = points.map(point => point[1]);
   const xmin = Math.min(...xs), ymin = Math.min(...ys);
   const dx = Math.max(...xs) - xmin || 1, dy = Math.max(...ys) - ymin || 1;
-  add('path', {d:'M55 23 V190 H422',fill:'none',stroke:'#5e786b'});
+  add('path', {d:'M55 23 V190 H422',fill:'none',stroke:'#c0d4bd'});
   for (let tick = 0; tick <= 4; tick++) {
     const x = 55 + tick * 90, y = 190 - tick * 39;
+    if(tick>0) add('line',{x1:55,y1:y,x2:422,y2:y,class:'grid-line'});
     add('text',{x,y:207,'text-anchor':'middle'},Number((xmin + dx * tick / 4).toPrecision(4)));
     add('text',{x:48,y:y+4,'text-anchor':'end'},Number((ymin + dy * tick / 4).toPrecision(4)));
   }
   add('polyline',{points:points.map(([x,y]) => [55 + 360 * (x-xmin)/dx, 190 - 156 * (y-ymin)/dy].join(',')).join(' '),stroke:'#28764b','stroke-width':3,fill:'none'});
-  add('text',{x:235,y:222,'text-anchor':'middle'},data.x || 'X');
-  add('text',{x:55,y:17},data.y || 'Y');
+  add('text',{x:235,y:225,'text-anchor':'middle',class:'axis-title'},data.x || 'X');
+  add('text',{x:55,y:17,class:'axis-title'},data.y || 'Y');
   return svg;
 }
 function boardCues(step, relevance = '') {
@@ -790,8 +811,9 @@ const bhpLesson = {
     }
   ],
   questions: [
-    {prompt: 'Where is this high-purity BHP deal available?', answer: 'It is available directly on TikTok Shop.'},
-    {prompt: 'What price can you find this pure BHP for?', answer: 'For under $40, beating typical retail prices.'}
+    {difficulty:'easy',prompt:'Where does the sample promotion say the deal is available?',answer:'It says the deal is available on TikTok Shop.'},
+    {difficulty:'medium',prompt:'What price does the sample promotion claim, and what is it compared with?',answer:'It claims a price under $40 and compares it with typical retail prices. This is a promotional claim, not independent verification.'},
+    {difficulty:'challenge',prompt:'What evidence would you need before relying on the promotion’s purity or price claims?',answer:'Check an independent quality report, current product listing, comparable prices, and the conditions of the deal. The sample alone does not establish these claims.'}
   ]
 };
 if (window.liveInk) {
@@ -818,7 +840,7 @@ function replayLine(row) {
   const cues = boardCues(current.steps[stepIndex],stepIndex === 0 ? current.relevance : '');
   const index = cues.findIndex(cue => cue.row === row);
   if (index < 0) return;
-  replayBookmark ||= {step:current.steps[stepIndex],cue:cuePosition};
+  replayBookmark ||= {step:current.steps[stepIndex],cue:cuePosition,position:resumePoint || learning.position(playbackPoint,audio)};
   stopVoice();
   replayOnly = true;
   $('return-replay').hidden = false;
@@ -826,11 +848,11 @@ function replayLine(row) {
   playVoice();
 }
 $('return-replay').onclick = () => {
-  if (replayBookmark) showStep(current.steps.indexOf(replayBookmark.step),true,replayBookmark.cue,true);
+  if (replayBookmark) showStep(current.steps.indexOf(replayBookmark.step),true,replayBookmark.cue,true,replayBookmark.position);
 };
 $('return-answer').onclick = () => {
   const origin = returnPoints.pop();
-  if (origin) showStep(origin.step,true,origin.cue,true);
+  if (origin) showStep(origin.step,true,origin.cue,true,origin.position);
 };
 function markPause() {
   const board = activeBoard();
@@ -840,8 +862,10 @@ function markPause() {
     board.querySelector?.(':scope > p') || board.querySelector?.('h2');
   target?.setAttribute('data-paused','true');
 }
-function showStep(index, autoplay = false, resumeCue = 0, keepReturn = false) {
+function showStep(index, autoplay = false, resumeCue = 0, keepReturn = false, position = null) {
   stopVoice();
+  resumePoint=position;
+  window.dogTutor?.setMood(autoplay?'idle':'listening');
   boardVersion++;
   replayOnly = false;
   replayBookmark = undefined;
@@ -914,6 +938,8 @@ function updateStepNavigation() {
   }));
 }
 function stopVoice() {
+  resumePoint=null;
+  playbackPoint=null;
   cancelStepWait();
   window.dogTutor?.stop();
   window.liveInk?.stop();
@@ -921,7 +947,10 @@ function stopVoice() {
   voiceRequest = undefined;
   if (localSpeechActive) window.speechSynthesis?.cancel();
   localSpeechActive = false;
-  audio?.pause();
+  if (audio) {
+    audio.pause();
+    audio.onplaying=audio.onended=audio.onpause=audio.onwaiting=audio.onerror=audio.onloadedmetadata=null;
+  }
   audio = undefined;
   if (audioUrl) URL.revokeObjectURL(audioUrl);
   audioUrl = undefined;
@@ -962,22 +991,38 @@ async function api(path, body, signal) {
 async function playVoice() {
   if (!current) return;
   if (voiceRequest || localSpeechActive) { pauseTeaching(); return; }
+  if (!$('quiz').hidden) { $('quiz').hidden=true; practiceEpoch++; }
   cancelStepWait();
   pausedForQuestion = false;
   const step = current.steps[stepIndex];
   const cues = boardCues(step,stepIndex === 0 ? current.relevance : '');
+  const savedPosition=learning.compatible(resumePoint,step,cuePosition,narrator,voiceStyle,provider);
+  resumePoint=null;
   const singleLine = replayOnly;
   let linePlayed = false;
   activeBoard().querySelectorAll('[data-paused]').forEach(item => item.removeAttribute('data-paused'));
   const request = new AbortController();
   voiceRequest = request;
-  $('voice').textContent = '■ Stop voice';
+  $('voice').textContent = 'Ⅱ Pause voice';
+  window.dogTutor?.setMood('thinking');
   const completed = new Set(cues.slice(0,cuePosition).map(cue => cue.row));
   activeBoard().querySelectorAll('li').forEach((line,i) => line.style.visibility = singleLine || completed.has(i) ? 'visible' : 'hidden');
   let index = cuePosition;
   let upcoming;
   const style = delivery();
-  const chosenVoice = narrator, chosenStyle = voiceStyle;
+  const chosenVoice = narrator, chosenStyle = voiceStyle, chosenProvider = provider;
+  function checkpoint(cue,segment=0,mode='audio',time=0,char=0) {
+    playbackPoint={step,cue,segment,mode,time,char,voice:chosenVoice,style:chosenStyle,provider:chosenProvider,player:null};
+  }
+  function attachPlayer(player, time=0) {
+    if (!playbackPoint) return;
+    playbackPoint.player=player;
+    playbackPoint.time=time;
+    if(time>0) {
+      const seek=()=>{ if(!request.signal.aborted) { try {player.currentTime=learning.offset(time,player.duration);} catch {} } };
+      if(player.readyState>=1) seek(); else player.addEventListener('loadedmetadata',seek,{once:true,signal:request.signal});
+    }
+  }
   const splitSpeech = text => {
     if (text.length < 180 || !Intl.Segmenter) return [text];
     const segments = [...new Intl.Segmenter('en',{granularity:'sentence'}).segment(text)].map(x=>x.segment.trim()).filter(Boolean);
@@ -999,18 +1044,20 @@ async function playVoice() {
     window.dogTutor?.stop();
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     audioUrl = undefined;
+    audio = undefined;
     if (singleLine && linePlayed) {
       stopVoice();
       return;
     }
     const cue = cues[index];
     if (!cue) {
+      cuePosition=index;
       stopVoice();
       const back = returnPoints.at(-1);
       if (back && stepIndex === back.lastAnswer) {
         returnPoints.pop();
         status('Returning to your lesson.');
-        showStep(back.step,true,back.cue,true);
+        showStep(back.step,true,back.cue,true,back.position);
       } else if (stepIndex + 1 < (back ? back.lastAnswer + 1 : current.mainStepCount ?? current.steps.length)) {
         showStep(stepIndex + 1,true,0,true);
       } else if (!waitingForMoreSteps()) { cuePosition = 0; status('Lesson complete. You can replay a step or ask a question.'); }
@@ -1018,7 +1065,10 @@ async function playVoice() {
     }
     linePlayed = true;
     cuePosition = index++;
+    const resume = savedPosition?.cue===cuePosition ? savedPosition : null;
+    checkpoint(cuePosition);
     const narration = cue.text;
+    window.dogTutor?.setMood('thinking');
     function beginWriting() {
       if (request.signal.aborted) return;
       displayCue(cue);
@@ -1033,7 +1083,9 @@ async function playVoice() {
         audio = new Audio(current.audioUrl);
       }
       const player = audio;
-      player.currentTime = start;
+      const sampleTime=resume?.mode==='sample'?Math.max(start,Math.min(end-.15,resume.time)):start;
+      checkpoint(cuePosition,0,'sample',sampleTime);
+      attachPlayer(player,sampleTime);
 
       let profile = current._audioProfile;
       if (!profile && window.dogTutor) {
@@ -1059,7 +1111,7 @@ async function playVoice() {
           }
         }
       };
-      player.addEventListener('timeupdate', onTime);
+      player.addEventListener('timeupdate', onTime,{signal:request.signal});
       player.onended = () => {
         if (request.signal.aborted) return;
         player.removeEventListener('timeupdate', onTime);
@@ -1078,7 +1130,7 @@ async function playVoice() {
         items.forEach(item => {
           item.style.visibility = 'visible';
         });
-        window.liveInk?.playSequence(items);
+        if (!resume || resume.time<=start) window.liveInk?.playSequence(items);
         window.dogTutor?.media(player, profile);
       };
       player.onpause = player.onwaiting = () => {
@@ -1096,7 +1148,9 @@ async function playVoice() {
       localVoice = english.find(voice=>/natural|neural|premium|enhanced/i.test(voice.name)) ||
         english.find(voice=>/google|samantha|ava|aria|jenny/i.test(voice.name)) ||
         english.find(voice=>!voice.localService) || english.find(voice=>voice.lang==='en-US') || english[0];
-      const utterance = new SpeechSynthesisUtterance(narration);
+      const char = resume?.mode==='browser' ? Math.min(resume.char || 0,Math.max(0,narration.length-1)) : 0;
+      checkpoint(cuePosition,0,'browser',0,char);
+      const utterance = new SpeechSynthesisUtterance(narration.slice(char));
       if (localVoice) utterance.voice = localVoice;
       utterance.lang = 'en-US';
       utterance.rate = style.speed;
@@ -1106,7 +1160,12 @@ async function playVoice() {
         beginWriting();
         window.dogTutor?.speech();
       };
-      utterance.onboundary = () => { if (!request.signal.aborted) window.dogTutor?.boundary(); };
+      utterance.onboundary = event => {
+        if (!request.signal.aborted) {
+          if(Number.isInteger(event.charIndex)) playbackPoint.char=char+event.charIndex;
+          window.dogTutor?.boundary();
+        }
+      };
       utterance.onend = nextCue;
       utterance.onerror = event => {
         if (request.signal.aborted) return;
@@ -1123,8 +1182,10 @@ async function playVoice() {
       let remainingSpeech = [];
       if (localGateway) {
         const segments = splitSpeech(narration);
-        remainingSpeech = segments.slice(1);
-        clip = await (upcoming || localClip(segments[0]));
+        const startSegment = resume?.mode==='audio' ? Math.min(resume.segment,segments.length-1) : 0;
+        checkpoint(cuePosition,startSegment,'audio',resume?.time || 0);
+        remainingSpeech = segments.slice(startSegment+1);
+        clip = await (upcoming || localClip(segments[startSegment]));
         if (request.signal.aborted) return;
         upcoming = remainingSpeech.length ? localClip(remainingSpeech[0]) :
           (!singleLine && cues[index] ? localClip(splitSpeech(cues[index].text)[0]) : null);
@@ -1147,6 +1208,7 @@ async function playVoice() {
       audio = new Audio(audioUrl);
       }
       const player = audio;
+      attachPlayer(player,resume?.mode==='audio' ? resume.time : 0);
       const profile = await window.dogTutor?.analyse(clip);
       if (request.signal.aborted) return;
       // Local synthesis already applies the chosen rate; avoid double slowing.
@@ -1156,6 +1218,7 @@ async function playVoice() {
         if (request.signal.aborted) return;
         if (!localGateway || !remainingSpeech.length) return nextCue();
         const segment = remainingSpeech.shift();
+        checkpoint(cuePosition,playbackPoint.segment+1,'audio');
         try {
           const [part] = await Promise.all([upcoming || localClip(segment),
             new Promise(resolve=>setTimeout(resolve,/[?]$/.test(segment.trim()) ? style.questionPause : style.pause))]);
@@ -1166,6 +1229,7 @@ async function playVoice() {
           if (audioUrl) URL.revokeObjectURL(audioUrl);
           audioUrl = URL.createObjectURL(part);
           const nextPlayer = audio = new Audio(audioUrl);
+          attachPlayer(nextPlayer);
           nextPlayer.onended = onSegmentEnd;
           const nextProfile = await window.dogTutor?.analyse(part);
           if (request.signal.aborted) return;
@@ -1182,7 +1246,11 @@ async function playVoice() {
       let writingStarted = false;
       player.onplaying = () => {
         if (request.signal.aborted) return;
-        if (!writingStarted) { beginWriting(); writingStarted = true; }
+        if (!writingStarted) {
+          if (resume && (resume.segment>0 || resume.time>0)) displayCue(cue);
+          else beginWriting();
+          writingStarted = true;
+        }
         window.dogTutor?.media(player,profile);
       };
       player.onpause = player.onwaiting = () => {
@@ -1205,12 +1273,15 @@ function pauseTeaching() {
   const visibility = items.map(item => item.style.visibility);
   const active = items.find(item => item.getAttribute('aria-current') === 'true');
   const caption = $('caption').textContent;
+  const saved=learning.position(playbackPoint,audio) || resumePoint;
   stopVoice();
+  resumePoint=saved;
   items.forEach((item,i) => item.style.visibility = visibility[i] || '');
   active?.setAttribute('aria-current','true');
   $('caption').textContent = caption;
   $('caption').hidden = !caption;
   pausedForQuestion = true;
+  window.dogTutor?.setMood('listening');
   markPause();
   $('voice').textContent = '▶ Resume lesson';
 }
@@ -1218,6 +1289,7 @@ $('question').onfocus = () => { if (voiceRequest || localSpeechActive) pauseTeac
 $('question').oninput = () => { $('question').onfocus(); micSession?.edit?.(); };
 function closePanels() {
   micSession?.cancelDraft?.(true);
+  if (!$('quiz').hidden) practiceEpoch++;
   $('ask').hidden = $('lesson-panel').hidden = $('quiz').hidden = true;
   $('panel-toggle').setAttribute('aria-expanded','false');
 }
@@ -1529,12 +1601,12 @@ document.addEventListener?.('visibilitychange',() => { if (document.hidden) disa
 
 const jsonPrompt = [
   'When a picture clarifies a step, include illustration: {caption: a short descriptive label, strokes: an array in the same format as drawings}. Draw a recognizable object or scene in up to 20 chalk strokes, with the most important detail clearly visible. Avoid duplicating graphs.',
-  'Return one JSON object only. Shape: {"title":"...","relevance":"...","steps":[{"title":"...","lines":["..."],"explanations":["..."],"narration":"...","graph":null}],"questions":[{"prompt":"...","answer":"..."}]}.',
+  'Return one JSON object only. Shape: {"title":"...","relevance":"...","steps":[{"title":"...","lines":["..."],"explanations":["..."],"narration":"...","graph":null}],"questions":[{"prompt":"...","answer":"...","difficulty":"easy|medium|challenge","hint":"optional short hint"}]}.',
   'For every step include an explanations array of strings, exactly one per board line in the same order. For each line give one or two short spoken sentences explaining why it is true or how to do it. Explain the operation or idea rather than merely repeating the line. Every line must have an explanation.',
   'Sketch relevant ideas as you teach. Include a drawings array indexed by board line. Each entry is an array of strokes or an empty array. Each stroke is {"points":[[x,y],...],"color":"teal","label":"optional short label"}. Coordinates use x from 0 to 100 and y from 0 to 40, measured from the top left. Points form straight segments, so repeat the first point to close a shape. Use teal or orange. Place labels at the final point. Use simple instructive sketches like areas, forces, timelines, or flows; explain what to look at in the matching spoken line.',
   'You are a patient one-on-one teacher. Use short whiteboard lines, intermediate reasoning and worked examples.',
   'Write narration for the ear: warm, gentle, conversational, and clear. Use natural contractions, short complete sentences, one idea per sentence, and pronounce equations, acronyms and units in plain spoken words. Add paragraph breaks between ideas and before a worked example; never write stage directions or phonetic markup. Keep symbolic notation on the board.',
-  'Teach with warm curiosity. Where it fits, invite the learner to predict what happens, give them a beat to think, then point out the detail on the board that explains the result. Let the discovery carry the enthusiasm.',
+  'You are Professor Paws, a warm, thoughtful dog tutor. Use occasional brief, sincere encouragement and light dog-themed wordplay at most once per lesson, never at the expense of clarity. No barking, baby talk, repetitive praise, or invented claims about the learner. Invite predictions when helpful; make mistakes feel like useful information, not failures.',
   'Speak like an experienced teacher working beside one learner. Stress the single idea that unlocks the problem, give an everyday comparison when helpful, and slow down for unfamiliar terms. Use gentle, confident enthusiasm and varied phrasing. For an interruption, address the exact question first with one short example.',
   'When a graph clarifies something, graph may be {"x":"axis label","y":"axis label","points":[[0,0],[1,1]]}. Points must be numeric.',
   'Relate the lesson concretely to the learner profile if supplied. If the profile is empty, describe the practical purpose without inventing personal details.',
@@ -1568,8 +1640,7 @@ function parseLesson(data) {
     throw new Error('The tutor returned an incomplete whiteboard. Please try again.');
   }
   result.relevance = typeof result.relevance === 'string' ? result.relevance : '';
-  result.questions = Array.isArray(result.questions) ? result.questions.filter(question =>
-    typeof question?.prompt === 'string' && typeof question.answer === 'string') : [];
+  result.questions = learning.questions(result.questions);
   const unique = new Map();
   for (const part of parts) {
     for (const item of part.annotations || []) {
@@ -1582,14 +1653,17 @@ function parseLesson(data) {
 }
 const generationInstructions = {
   first:'Begin a new lesson. Give the lesson its full title. Return exactly one self-contained opening step with 2 or 3 board lines. Leave questions empty. Further steps will be requested separately.',
-  rest:'Continue the supplied lesson after the completed opening step. Return only the next 2 to 5 teaching steps, in order, and practice questions with answers. Do not repeat the opening step.',
+  rest:'Continue the supplied lesson after the completed opening step. Return only the next 2 to 5 teaching steps, in order, and exactly one practice question for each difficulty (easy recall, medium application, challenge transfer), with a worked answer and optional hint. Do not repeat the opening step.',
   question:'Answer the exact follow-up immediately in the first board line and its narration. Prefer one step with 2 or 3 short board lines and one concrete example if useful; use a second step only when necessary for accuracy. Do not repeat the original lesson, add an introduction, or generate practice questions unless asked. Keep every line explanation to one or two spoken sentences; return valid lesson JSON.',
-  full:'Provide 3 to 6 steps and practice questions with answers.',
+  full:'Provide 3 to 6 steps and one practice question at each of easy, medium and challenge difficulty with worked answers and optional hints.',
+  practice_easy:'Return exactly three easy recall or single-operation practice questions about the supplied lesson, with short hints, worked answers and difficulty easy. Include one minimal valid placeholder step; the practice questions are the only content used.',
+  practice_medium:'Return exactly three medium application practice questions about the supplied lesson, with short hints, worked answers and difficulty medium. Include one minimal valid placeholder step; the practice questions are the only content used.',
+  practice_challenge:'Return exactly three challenge transfer or multi-step reasoning practice questions about the supplied lesson, with short hints, worked answers and difficulty challenge. Include one minimal valid placeholder step; the practice questions are the only content used.',
   context:'Return a lesson-shaped JSON object whose relevance is one concise, concrete sentence connecting this topic to the learner profile. Include one minimal valid step because the response schema requires it.'
 };
 async function teach(text, files, search, phase = 'full') {
   const controller = new AbortController();
-  const task = {controller,message:phase === 'rest' ? 'Preparing later steps…' : ''};
+  const task = {controller,phase,message:phase === 'rest' ? 'Preparing later steps…' : phase.startsWith('practice_')?'Preparing practice questions…':'Professor Paws is thinking…'};
   lessonRequests.add(task);
   updateRequests();
   const timeoutSeconds = [freeLLM,localAuto].includes(provider) ? 180 : 60;
@@ -1893,7 +1967,9 @@ $('ask').onsubmit = asyncAction(async run => {
   const version = boardVersion;
   pauseTeaching();
   const savedCue = cuePosition;
+  const savedPlayback=resumePoint;
   status('Professor Paws is thinking about your question…');
+  window.dogTutor?.setMood('thinking');
   const focus = boardCues(parent.steps[activeStep],activeStep === 0 ? parent.relevance : '')[savedCue];
   const selected = parent.steps[activeStep];
   // Preserve the teaching context, but avoid sending bulky chalk path geometry.
@@ -1910,32 +1986,97 @@ $('ask').onsubmit = asyncAction(async run => {
   $('lesson-mode').textContent = 'TUTOR SESSION';
   saveLesson(current);
   $('question').value = '';
-  returnPoints.push({step:stepIndex,cue:savedCue,question,lastAnswer:current.steps.length-1});
+  returnPoints.push({step:stepIndex,cue:savedCue,position:savedPlayback,question,lastAnswer:current.steps.length-1});
   closePanels();
   showStep(first, true,0,true);
   status();
 });
-$('practice').onclick = () => {
-  $('lesson-panel').hidden = true;
-  $('panel-toggle').setAttribute('aria-expanded','false');
-  const panel = $('quiz');
-  panel.hidden = !panel.hidden;
-  if (panel.hidden) return;
-  stopVoice();
-  panel.replaceChildren(make('h2','Practice'));
-  if (!current.questions.length) { panel.append(make('p','Ask the tutor to add practice questions for this topic.')); return; }
-  const list = make('ol');
-  for (const question of current.questions) {
-    const row = make('li', question.prompt);
-    const response = make('input');
-    response.placeholder = 'Write your answer';
-    response.setAttribute('aria-label', question.prompt);
-    const solution = make('details');
-    solution.append(make('summary','Show worked answer'), make('p',question.answer));
-    row.append(response, solution);
-    list.append(row);
+function renderPractice() {
+  const panel=$('quiz');
+  if (!current || panel.hidden) return;
+  const owner=current;
+  const all=learning.questions(current.questions);
+  const visible=all.filter(q=>q.difficulty===practiceLevel);
+  const head=make('div'); head.className='practice-head';
+  const close=make('button','Close'); close.type='button';
+  close.onclick=()=>{panel.hidden=true;practiceEpoch++;window.dogTutor?.setMood('listening');$('voice').focus();};
+  head.append(make('h2','Practice with Paws'),close);
+  const levels=make('div');levels.className='practice-levels';levels.setAttribute('role','group');levels.setAttribute('aria-label','Practice difficulty');
+  const available=all.some(q=>q.difficulty==='review')?[...learning.levels,'review']:learning.levels;
+  const labels={easy:'Easy',medium:'Medium',challenge:'Challenge',review:'Saved review'};
+  for(const level of available) {
+    const button=make('button',labels[level]);button.type='button';button.setAttribute('aria-pressed',String(practiceLevel===level));
+    button.onclick=()=>{practiceLevel=level;practiceEpoch++;renderPractice();};
+    levels.append(button);
+  }
+  const progress=make('p');progress.className='practice-progress';progress.setAttribute('role','status');
+  const keyFor=q=>q.difficulty+'\0'+q.prompt;
+  function refreshProgress(){
+    const tried=visible.filter(q=>practiceAttempts.has(keyFor(q))).length;
+    const got=visible.filter(q=>practiceAttempts.get(keyFor(q))==='got').length;
+    progress.textContent=tried+' / '+visible.length+' reviewed · '+got+' self-checked correct';
+  }
+  refreshProgress();
+  const note=make('p','Try each answer before revealing the solution. Compare your reasoning and mark your own result; no automatic grading.');note.className='practice-note';
+  panel.replaceChildren(head,levels,progress,note);
+  if(!visible.length) panel.append(make('p','No questions at this level yet. Generate a set for this lesson, or switch to a level with questions.'));
+  const list=make('ol');list.className='practice-list';
+  for(const q of visible){
+    const id=keyFor(q);
+    const row=make('li');
+    row.append(make('strong',q.prompt));
+    const input=make('textarea');input.rows=2;input.placeholder='Write your answer first';input.setAttribute('aria-label',q.prompt);input.value=practiceDrafts.get(id)||'';
+    input.oninput=()=>practiceDrafts.set(id,input.value);
+    row.append(input);
+    if(q.hint){
+      const hint=make('details');hint.append(make('summary','Need a hint?'),make('p',q.hint));row.append(hint);
+    }
+    const solution=make('details');solution.append(make('summary','Reveal worked answer'),make('p',q.answer));
+    const actions=make('div');actions.className='practice-actions';
+    const got=make('button','I got it');got.type='button';const retry=make('button','Need another try');retry.type='button';
+    const result=make('p');result.className='practice-result';result.setAttribute('role','status');
+    function update(){
+      const value=practiceAttempts.get(id);
+      got.setAttribute('aria-pressed',String(value==='got'));retry.setAttribute('aria-pressed',String(value==='retry'));
+      result.textContent=value==='got'?'Nice work — keep it up.':value==='retry'?'Review the reasoning and try again.':'';
+    }
+    function assess(value){practiceAttempts.set(id,value);update();refreshProgress();window.dogTutor?.setMood(value==='got'?'happy':'encourage',3200);}
+    got.onclick=()=>assess('got');retry.onclick=()=>assess('retry');
+    actions.append(got,retry);solution.append(actions,result);solution.open=practiceAttempts.has(id);update();
+    solution.addEventListener('toggle',()=>{if(solution.open&&!practiceAttempts.has(id)) window.dogTutor?.setMood('insight',2200);});
+    row.append(solution);list.append(row);
   }
   panel.append(list);
+  if(practiceLevel!=='review' && !owner.demo){
+    const generate=make('button','Generate more '+labels[practiceLevel].toLowerCase()+' questions');generate.type='button';
+    generate.onclick=async()=>{
+      if(busy)return;
+      if(!key&&provider!==localAuto){settings();return;}
+      const requested=practiceLevel,epoch=practiceEpoch,run=++operation;
+      busy=true;generate.disabled=true;generate.textContent='Preparing questions…';
+      window.dogTutor?.setMood('thinking');
+      try{
+        const steps=owner.steps.slice(0,owner.mainStepCount??owner.steps.length).slice(0,12).map(s=>({title:s.title,lines:s.lines}));
+        const result=await teach(JSON.stringify({title:owner.title,steps,difficulty:requested,existingPrompts:all.filter(q=>q.difficulty===requested).map(q=>q.prompt).slice(0,15)}),[],false,'practice_'+requested);
+        if(run!==operation || current!==owner)return;
+        const extra=learning.questions(result.questions).filter(q=>q.difficulty===requested);
+        if(!extra.length)throw Error('The tutor did not return questions at the selected difficulty. Please try again.');
+        owner.questions=learning.mergeQuestions(owner.questions||[],extra);saveLesson(owner);
+        if(!panel.hidden&&epoch===practiceEpoch)renderPractice();
+        window.dogTutor?.setMood('insight',2200);
+      }catch(error){if(run===operation&&current===owner){status(error.message,true);generate.disabled=false;generate.textContent='Retry question generation';}}
+      finally{if(run===operation){busy=false;if(generate.isConnected&&generate.disabled){generate.disabled=false;generate.textContent='Generate more '+labels[requested].toLowerCase()+' questions';}}}
+    };
+    panel.append(generate);
+  } else if(!visible.length&&owner.demo) panel.append(make('p','This sample includes a fixed practice set. Start your own lesson for more questions.'));
+}
+$('practice').onclick = () => {
+  $('lesson-panel').hidden=true;
+  $('panel-toggle').setAttribute('aria-expanded','false');
+  const panel=$('quiz');panel.hidden=!panel.hidden;practiceEpoch++;
+  if(panel.hidden)return;
+  pauseTeaching();
+  renderPractice();
 };
 $('files').onchange = event => {
   const files = [...event.target.files];

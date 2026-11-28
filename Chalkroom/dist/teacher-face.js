@@ -4,7 +4,16 @@ window.dogTutor = (() => {
   const avatar = document.getElementById('dog-tutor');
   const jaw = document.getElementById('dog-mouth');
   const tongue = document.getElementById('dog-tongue');
-  let frame, lastOpening = -1, wordAt = 0;
+  const moodLabel = document.getElementById('dog-mood');
+  const moods = {idle:'Ready to learn',thinking:'Thinking it through',listening:'Listening to you',happy:'Nice work!',insight:'A little lightbulb moment',encourage:'One step at a time',speaking:'Explaining gently'};
+  let frame, lastOpening = -1, wordAt = 0, moodTimer, mood = 'idle';
+  function setMood(next='idle',duration=0) {
+    clearTimeout(moodTimer);
+    mood=Object.hasOwn(moods,next)?next:'idle';
+    avatar?.setAttribute('data-mood',mood);
+    if(moodLabel && moodLabel.textContent!==moods[mood]) moodLabel.textContent=moods[mood];
+    if(duration>0) moodTimer=setTimeout(()=>setMood(avatar?.getAttribute('data-speaking')==='true'?'speaking':'idle'),duration);
+  }
   function mouth(opening) {
     opening = Math.round(Math.max(0,Math.min(1,opening))*8);
     if (!jaw || opening === lastOpening) return;
@@ -18,6 +27,7 @@ window.dogTutor = (() => {
     cancelAnimationFrame(frame);
     avatar?.removeAttribute('data-speaking');
     mouth(0);
+    if (mood==='speaking') setMood('idle');
   }
   async function analyse(blob) {
     if (!window.OfflineAudioContext || !blob) return null;
@@ -57,8 +67,9 @@ window.dogTutor = (() => {
   }
   function animate(read) {
     stop();
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setMood('speaking');
     avatar?.setAttribute('data-speaking','true');
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let lastFrame = -Infinity;
     function tick(now) {
       if (now-lastFrame>=32) { mouth(read()); lastFrame=now; }
@@ -79,7 +90,7 @@ window.dogTutor = (() => {
     boundary();
     animate(() => Math.abs(Math.sin((performance.now()-wordAt)*.01172))*.72);
   }
-  return {analyse,media,speech,boundary,stop};
+  return {analyse,media,speech,boundary,stop,setMood};
 })();
 
 // Keep compatibility with older lesson harnesses.

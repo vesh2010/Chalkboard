@@ -155,3 +155,11 @@ Professor Paws is a vector golden-retriever tutor with audio-driven mouth moveme
 The new default Auto voice uses ElevenLabs when both `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` exist in the local `.env`; otherwise it uses the installed Cori neural Piper model. If a configured ElevenLabs request fails, the app reports the error rather than silently changing voices. Local and browser voice quality depends on the installed model or device. No cloud voice credentials are included. Voice style and engine choices persist in the browser. Existing prerecorded sample audio is unchanged.
 
 Long local narration uses sentence-aware prefetch and playback. Follow-up questions ask for the direct answer first and omit bulky SVG path data from the context. FreeLLMAPI now keeps its extended primary timeout when there are no backup providers, with authentication failover when backups are available.
+
+## Professor Paws — Batch 2
+
+Paws now reacts to lesson preparation, listening, explanation, key insights, self-checked practice results and lesson completion. The dog personality is intentionally subtle. Reduced motion disables animated effects while keeping readable state labels. Chalk lettering is brighter, active and paused lines are clearer, and graphs have larger labels and faint grid lines.
+
+Pause voice, ask a question, or open Practice without losing the current cue. For generated media, resuming restores the active sentence segment and seek position where supported; browser speech resumes from the last reported word boundary (or repeats the cue if none is available). Changing the voice/engine restarts the current cue rather than seeking into a different recording. Position is session-only, not saved across refreshes.
+
+Practice includes Easy, Medium and Challenge questions, optional hints, worked answers, and learner self-assessment. Existing untagged questions appear under Saved review. New lessons request one question at each level, and connected lessons can generate more at the chosen level. Sample lessons include three fixed questions. Typed answers and self-check counts are session-only; no unreliable automatic correctness grading is used.

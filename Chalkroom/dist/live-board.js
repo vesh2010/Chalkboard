@@ -139,10 +139,10 @@ window.liveInk = (() => {
     function write(char) {
       const glyph = window.penFont?.[char.codePointAt(0) - 33];
       if (glyph?.d) {
-        path(glyph.d, x, y, '#f4edcf', 1.8);
+        path(glyph.d, x, y, '#fff3d6', 2.05);
         x += glyph.o * 2 + 1;
       } else {
-        const label = element('text', {x, y: y + 22, 'font-size': 22, fill: '#f4edcf', 'font-family': 'Inter, "Segoe UI", sans-serif'});
+        const label = element('text', {x, y: y + 22, 'font-size': 22, fill: '#fff3d6', 'font-family': 'Inter, "Segoe UI", sans-serif'});
         label.textContent = char; svg.append(label);
         strokes.push({label, length: 16, dx: x, dy: y + 18});
         const measured = fallbackWidths.has(char) ? fallbackWidths.get(char) :
@@ -222,7 +222,7 @@ window.liveInk = (() => {
             const label = element('text', {
               x: labelX,
               y: labelY,
-              'font-size': 13.5,
+              'font-size': 15,
               'font-weight': '600',
               'font-family': 'Inter, "Segoe UI", sans-serif',
               fill: color,
@@ -322,10 +322,10 @@ window.liveInk = (() => {
   function play(row, onComplete) {
     stop();
     const ink = rows.get(row);
-    if (!ink || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!ink || matchMedia('(prefers-reduced-motion: reduce)').matches) { onComplete?.(); return; }
     const {strokes, tip} = ink;
     const total = strokes.reduce((sum, s) => sum + s.length, 0);
-    if (!total) return;
+    if (!total) { onComplete?.(); return; }
 
     for (const s of strokes) {
       if (s.p) {

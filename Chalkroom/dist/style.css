@@ -103,3 +103,38 @@ body:has(#lesson:not([hidden]))>.sidebar,body:has(#lesson:not([hidden])) main>he
 @keyframes paws-ear{0%,85%,100%{transform:rotate(0)}91%{transform:rotate(7deg)}}
 @media(max-width:760px){.dog-portrait{width:48px;height:48px}.dog-subtitle{display:none}}
 @media(prefers-reduced-motion:reduce){.dog-avatar *{animation:none!important;transition:none!important}}
+
+/* Batch 2: responsive reactions and clearer board typography. */
+.dog-reaction-stars,.dog-thought{opacity:0;transition:opacity .2s ease}
+.dog-avatar[data-mood="happy"] .dog-reaction-stars,.dog-avatar[data-mood="insight"] .dog-reaction-stars,.dog-avatar[data-mood="thinking"] .dog-thought{opacity:1}
+.dog-avatar[data-mood="thinking"] .dog-head{transform:rotate(-6deg)}
+.dog-avatar[data-mood="listening"] .dog-head{transform:rotate(5deg)}
+.dog-avatar[data-mood="encourage"] .dog-head{transform:rotate(-3deg)}
+.dog-avatar[data-mood="happy"] .dog-head{animation:paws-cheer .65s ease-in-out 2}
+.dog-avatar[data-mood="insight"] .dog-reaction-stars{animation:paws-sparkle .8s ease-in-out 2}
+.dog-avatar[data-mood="thinking"] .dog-thought{animation:paws-sparkle 2s ease-in-out infinite}
+@keyframes paws-cheer{0%,100%{transform:translateY(0)}45%{transform:translateY(-3px) rotate(3deg)}}
+@keyframes paws-sparkle{0%,100%{opacity:.55}50%{opacity:1}}
+#board li,#board li:has(.ink-sheet),#answer-board li{margin-bottom:13px;padding-block:8px;line-height:1.55}
+#board li::before{color:#d6e9d3;top:12px;font-size:12px}
+#board li[aria-current=true],#board li[aria-current=true]:has(.ink-sheet),#answer-board li[aria-current=true]{background:#f2ffcc12;box-shadow:inset 3px 0 #f6dc92;border-radius:5px}
+#board li[data-paused=true],#answer-board li[data-paused=true]{outline:1px dashed #f5da98;outline-offset:1px}
+#board .chart,#answer-board .chart{width:min(96%,440px);background:#102f27;border:1px solid #d6e9d355}
+#board .chart text,#answer-board .chart text{fill:#fff5d7;font-size:14px}
+#board .chart .axis-title,#answer-board .chart .axis-title{font-weight:600;font-size:15px;fill:#ffe49a}
+#board .chart .grid-line,#answer-board .chart .grid-line{stroke:#d6e9d32a;stroke-width:1}
+#board figcaption,#answer-board figcaption{color:#e7f3df;line-height:1.55}
+#lesson #caption{font-weight:500;line-height:1.6}
+.practice-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.practice-levels{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+.practice-levels button[aria-pressed=true]{background:#234e3e;color:#fff8e6}
+.practice-progress,.practice-note{font-size:13px;line-height:1.45;color:#365b4a}
+.practice-list{padding-left:20px;display:grid;gap:14px}
+.practice-list li{padding:12px 0;border-bottom:1px solid #33584330}
+.practice-list textarea{width:100%;margin-top:8px;resize:vertical}
+.practice-list details{margin-top:8px}
+.practice-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.practice-result{font-size:13px;font-weight:600;color:#275741}
+.practice-list button[aria-pressed=true]{background:#d4e5b9}
+@media(max-width:760px){#board li,#board li:has(.ink-sheet){margin-bottom:9px;padding-block:6px}.practice-levels button{padding:8px}}
+@media(prefers-reduced-motion:reduce){.dog-avatar *{animation:none!important;transition:none!important}}
