@@ -40,6 +40,7 @@
       <textarea id="topic" rows="2" placeholder="Enter a topic, paste a problem, or attach study materials…"></textarea>
       <div class="study-mode-picker"><label for="study-mode">Learning mode</label><select id="study-mode" name="study-mode"></select><p id="study-mode-note"></p></div>
       <div class="actions"><label class="attach">＋ Attach files<input id="files" type="file" multiple accept=".pdf,.txt,.md,.csv,.pptx,.docx,image/png,image/jpeg,image/webp,.mp3,.wav,.m4a"></label><label class="toggle"><input id="search" type="checkbox" checked> Search the web</label><button class="primary" type="submit">Start lesson →</button></div>
+      <p id="gemini-quota-note" hidden>Gemini free tier: Google Search uses a separate quota. Leave search off for ordinary lessons. Choose the exact text model in API settings.</p>
       <div id="attachments"></div>
     </form>
     <div class="pawgress-home"><span id="home-progress">Your learning trail starts here.</span><button id="home-progress-open" type="button">View Pawgress</button></div>

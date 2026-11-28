@@ -16,8 +16,8 @@ async function runRegression({app,helper,fallback,URL,Headers,Response,AbortCont
     cut('const jsonPrompt =','async function geminiVoice')+
     cut('function boardCues(','async function refreshWorkExample');
   const adapter=new Function('window','learning','fetch','Headers','Response','URL','AbortController','AbortSignal','setTimeout','clearTimeout', 
-    "let provider='FreeLLMAPI',key='test-key',current,studyPreferences={mode:'beginner'};const localGateway=true,alibaba='Alibaba Cloud',custom='Custom web API',freeLLM='FreeLLMAPI',tokenHarbor='Token Harbor',localAuto='Local API fallback',harborApi='https://tokenharbor.ai/v1',harborModel='mock-model',freeEndpoint=window.location.origin+'/v1',freeModel='auto:fast',profile={},dashHosts={Singapore:'mock.alibaba.test'},dashRegion='Singapore',customApi={endpoint:'https://mock.custom.test/v1/chat/completions',model:'mock-model',header:'Authorization',prefix:'Bearer',path:'choices.0.message.content'},lessonRequests=new Set();const updateRequests=()=>{};const tutor=()=>({name:'Professor Paws',personality:'patient'}),delivery=()=>({description:'gentle'});"+adapterSource+
-    "\nreturn {teach,parseLesson,boardCues,gatewayProgress,setProvider:p=>provider=p,requests:lessonRequests};"
+    "let provider='FreeLLMAPI',key='test-key',current,studyPreferences={mode:'beginner'},geminiModel='gemini-3.6-flash',geminiSearch=false;const localGateway=true,alibaba='Alibaba Cloud',custom='Custom web API',freeLLM='FreeLLMAPI',tokenHarbor='Token Harbor',localAuto='Local API fallback',harborApi='https://tokenharbor.ai/v1',harborModel='mock-model',freeEndpoint=window.location.origin+'/v1',freeModel='auto:fast',profile={},dashHosts={Singapore:'mock.alibaba.test'},dashRegion='Singapore',customApi={endpoint:'https://mock.custom.test/v1/chat/completions',model:'mock-model',header:'Authorization',prefix:'Bearer',path:'choices.0.message.content'},lessonRequests=new Set();const updateRequests=()=>{};const tutor=()=>({name:'Professor Paws',personality:'patient'}),delivery=()=>({description:'gentle'});"+adapterSource+
+    "\nreturn {teach,parseLesson,boardCues,gatewayProgress,setProvider:p=>provider=p,setGeminiSearch:v=>geminiSearch=v,requests:lessonRequests};"
   );
   let fetchImpl=()=>{throw Error('unexpected network')};
   const api=adapter(window,learning,(...args)=>fetchImpl(...args),Headers,Response,URL,AbortController,AbortSignal,setTimeout,clearTimeout);
@@ -38,7 +38,7 @@ async function runRegression({app,helper,fallback,URL,Headers,Response,AbortCont
       assert(JSON.stringify(body).includes('Tutor character:'),'missing tutor');
       assert(JSON.stringify(body).includes(title),'missing topic');
       if(provider==='OpenAI')return json(output(lesson));
-      if(provider==='Gemini')return json({candidates:[{content:{parts:[{text:JSON.stringify(lesson)}]}}]});
+      if(provider==='Gemini'){assert(url.includes('/gemini-3.6-flash:generateContent'),'wrong Gemini model');assert(!body.tools,'unexpected grounding');return json({candidates:[{content:{parts:[{text:JSON.stringify(lesson)}]}}]});}
       if(provider==='Alibaba Cloud')return json({output:{choices:[{message:{content:[{text:JSON.stringify(lesson)}]}}]}});
       if(provider!=='Local API fallback')assert(opts.headers.get('Authorization')==='Bearer test-key','wrong authorization');
       assert(body.stream===false,'unexpected streaming request');
@@ -69,6 +69,27 @@ async function runRegression({app,helper,fallback,URL,Headers,Response,AbortCont
   await test('Invalid first backup falls through to next',async()=>{const second={...backup,slot:3,url:{href:'https://backup2.test'}};const r=await router.tryRoutes([backup,second],[],new AbortController().signal,async u=>u===backup.url?json({choices:[]}):good());assert(r.fallbackSlot===3);});
   await test('Cancelled gateway does not call backup',async()=>{const c=new AbortController();c.abort('cancelled');let calls=0;let failed=false;try{await router.gatewayLesson(body,'Bearer test-key',upstream,c.signal,async()=>[backup],async()=>{calls++;throw Error('cancelled');});}catch{failed=true;}assert(failed&&calls<=1);});
   await test('Provider annotations normalize source links',async()=>{const data=output(fixture('X'));data.output[0].content[0].annotations=[{type:'url_citation',url:'https://example.org/ref#one',title:'Reference'},{type:'url_citation',url:'https://example.org/ref#two',title:'Reference'},{type:'url_citation',url:'javascript:alert(1)'},null];const r=api.parseLesson(data);assert(r.sources.length===1&&r.sources[0].origin==='provider'&&r.searched);});
+  await test('Gemini free mode skips search even when an earlier retry requested it',async()=>{
+    api.setProvider('Gemini');api.setGeminiSearch(false);let calls=0;
+    fetchImpl=async(u,o)=>{calls++;assert(!JSON.parse(o.body).tools);return json({candidates:[{content:{parts:[{text:JSON.stringify(fixture('X'))}]}}]});};
+    const lesson=await api.teach('X',[],true,'first');assert(calls===1&&lesson.searchNotice&&!lesson.searched);
+  });
+  await test('Gemini grounding-specific quota retries once without search',async()=>{
+    api.setProvider('Gemini');api.setGeminiSearch(true);let calls=0;
+    fetchImpl=async(u,o)=>{calls++;const body=JSON.parse(o.body);if(calls===1){assert(body.tools);return json({error:{message:'Google Search grounding quota exceeded',details:[{violations:[{quotaId:'GroundingRequestsPerDay'}]}]}},429);}assert(!body.tools);return json({candidates:[{content:{parts:[{text:JSON.stringify(fixture('X'))}]}}]});};
+    const lesson=await api.teach('X',[],true,'first');assert(calls===2&&lesson.searchNotice&&!lesson.searched);
+  });
+  await test('Gemini model daily quota is not retried',async()=>{
+    api.setProvider('Gemini');api.setGeminiSearch(true);let calls=0;
+    fetchImpl=async()=>{calls++;return json({error:{message:'Quota exceeded',details:[{violations:[{quotaId:'GenerateRequestsPerDayPerProjectPerModel-FreeTier',quotaDimensions:{model:'gemini-3.6-flash'}}]}]}},429);};
+    const error=await rejects(()=>api.teach('X',[],true,'first'),/daily quota/);assert(calls===1&&error.dailyQuota&&error.model==='gemini-3.6-flash');
+  });
+  await test('Gemini zero quota and retry delay have actionable diagnostics',async()=>{
+    const zero=learning.geminiFailure('gemini-3.6-flash',429,{error:{details:[{violations:[{quotaId:'GenerateRequestsPerMinute',quotaValue:'0'}]}]}});
+    assert(zero.zeroQuota&&/zero quota/.test(learning.recovery(zero).hint));
+    const delay=learning.geminiFailure('gemini-3.6-flash',429,{error:{details:[{retryDelay:'11.3s'}]}});
+    assert(delay.retrySeconds===12&&/12 seconds/.test(learning.recovery(delay).hint));
+  });
   return results;
 }
 const read=p=>readFile(new URL('../'+p,import.meta.url),'utf8');

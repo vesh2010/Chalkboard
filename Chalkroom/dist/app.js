@@ -53,6 +53,11 @@ function renderPawgressHome(){
 }
 renderPawgressHome();
 let studyPreferences=learning.preferences(read('studyPreferences',{}));
+let geminiSearch=read('geminiSearch',false)===true;
+let geminiModel=read('geminiTextModel','gemini-3.6-flash');
+if(typeof geminiModel!=='string'||!/^gemini-[a-z0-9.-]+$/.test(geminiModel))geminiModel='gemini-3.6-flash';
+let geminiCloudVoice=read('geminiCloudVoice',false)===true;
+let geminiVoiceBlocked=false;
 function updateStudyPreferences(value) {
   studyPreferences=learning.preferences(value);
   persist('studyPreferences',studyPreferences);
@@ -61,14 +66,17 @@ function updateStudyPreferences(value) {
 function renderStudyMode() {
   $('study-mode').value=studyPreferences.mode;
   $('study-mode-note').textContent=learning.modes[studyPreferences.mode].description;
-  $('search').checked=studyPreferences.search;
+  $('search').checked=provider==='Gemini'?geminiSearch:studyPreferences.search;
+  $('gemini-quota-note').hidden=provider!=='Gemini';
 }
 for(const [id,mode] of Object.entries(learning.modes)){
   const option=make('option',mode.label);option.value=id;$('study-mode').append(option);
 }
-renderStudyMode();
 $('study-mode').onchange=()=>updateStudyPreferences({...studyPreferences,mode:$('study-mode').value});
-$('search').onchange=()=>updateStudyPreferences({...studyPreferences,search:$('search').checked});
+$('search').onchange=()=>{
+  if(provider==='Gemini'){geminiSearch=$('search').checked;persist('geminiSearch',geminiSearch);}
+  else updateStudyPreferences({...studyPreferences,search:$('search').checked});
+};
 const savedStyle = read('voiceStyle','gentle');
 let voiceStyle = Object.hasOwn(voiceStyles,savedStyle) ? savedStyle : 'gentle';
 const savedNarrator = read('narratorV2','auto');
@@ -208,6 +216,7 @@ function status(message = '', error = false) {
   else if (/Lesson complete/.test(message)) window.dogTutor?.setMood('happy',3500);
 }
 function updateConnection() {
+  renderStudyMode();
   $('connection').textContent = provider === localAuto ? localAuto : key ? provider + ' · Key saved' : 'Demo mode';
   $('dot').style.background = key ? '#468849' : '';
 }
@@ -338,6 +347,13 @@ function settings() {
         customApi = next;
       } catch (error) { $('custom-error').textContent = error.message; return false; }
     }
+    if(data.get('provider')==='Gemini'){
+      const model=String(data.get('geminiModel')||'').trim();
+      if(!/^gemini-[a-z0-9.-]+$/.test(model)){geminiError.textContent='Enter the exact Gemini model ID from AI Studio.';return false;}
+      geminiModel=model;geminiSearch=data.has('geminiSearch');geminiCloudVoice=data.has('geminiCloudVoice');
+      geminiVoiceBlocked=false;
+      persist('geminiTextModel',geminiModel);persist('geminiSearch',geminiSearch);persist('geminiCloudVoice',geminiCloudVoice);
+    }
     if(voiceRequest||localSpeechActive) pauseTeaching();
     provider = data.get('provider');
     dashRegion = data.get('region') || dashRegion;
@@ -361,6 +377,14 @@ function settings() {
   select.value = provider;
   label.append(select);
   root.append(label,make('p','Use the key issued by your selected provider. Your saved connection survives refreshes in this tab.'));
+  const geminiFields=make('div');
+  field(geminiFields,'Gemini text model ID','geminiModel',geminiModel,'text');
+  for(const [name,label,checked] of [['geminiSearch','Enable Google Search grounding (requires separate eligible quota)',geminiSearch],['geminiCloudVoice','Use Gemini cloud speech on web-only installations (separate quota)',geminiCloudVoice]]){
+    const wrap=make('label',label+' '),control=make('input');control.type='checkbox';control.name=name;control.checked=checked;wrap.append(control);geminiFields.append(wrap);
+  }
+  geminiFields.append(make('p','Free-tier recommended: gemini-3.6-flash, search off, cloud speech off. Local Chalkroom always uses your selected local/ElevenLabs voice engine.'));
+  const geminiError=make('p');geminiError.setAttribute('role','alert');geminiFields.append(geminiError);
+  root.append(geminiFields);
   const regionLabel = make('label','Model Studio key region ');
   const region = make('select');
   region.name = 'region';
@@ -426,6 +450,8 @@ function settings() {
   problem.setAttribute('role','alert');
   advanced.append(problem);
   function showCustom() {
+    geminiFields.hidden=select.value!=='Gemini';
+    geminiFields.querySelectorAll('input').forEach(control=>control.disabled=geminiFields.hidden);
     harborFields.hidden = select.value !== tokenHarbor;
     harborInput.disabled = harborFields.hidden;
     freeFields.hidden = select.value !== freeLLM;
@@ -535,7 +561,8 @@ function editProfile() {
     const audioChanged=voiceStyle!==data.get('voiceStyle')||narrator!==(data.get('voiceEngine')||narrator)||studyPreferences.pace!==data.get('pace');
     profile=next;
     persist('profile',profile);
-    updateStudyPreferences({mode:data.get('mode'),pace:data.get('pace'),difficulty:data.get('difficulty'),search:data.get('searchDefault')==='yes'});
+    if(provider==='Gemini'){geminiSearch=data.get('searchDefault')==='yes';persist('geminiSearch',geminiSearch);}
+    updateStudyPreferences({mode:data.get('mode'),pace:data.get('pace'),difficulty:data.get('difficulty'),search:provider==='Gemini'?studyPreferences.search:data.get('searchDefault')==='yes'});
     voiceStyle=Object.hasOwn(voiceStyles,data.get('voiceStyle'))?data.get('voiceStyle'):'gentle';
     narrator=data.get('voiceEngine')||narrator;
     chooseTutor(data.get('tutor'),false);
@@ -556,10 +583,10 @@ function editProfile() {
   preferenceSelect(root,'Dog tutor','tutor',Object.entries(pawgress.tutors).map(([id,t])=>[id,t.name+' · '+t.breed]),activeTutor);
   preferenceSelect(root,'Voice style','voiceStyle',Object.entries(voiceStyles).map(([id,s])=>[id,s.label]),voiceStyle);
   if(localGateway) preferenceSelect(root,'Voice engine','voiceEngine',[['auto','Auto · ElevenLabs if configured'],['elevenlabs','ElevenLabs'],['cori','Cori'],['storyteller','Ryan storyteller'],['ryan','Ryan'],['alan','Alan']],narrator);
-  preferenceSelect(root,'Search the web by default','searchDefault',[['yes','On'],['no','Off']],studyPreferences.search?'yes':'no');
+  preferenceSelect(root,'Search the web by default','searchDefault',[['yes','On'],['no','Off']],(provider==='Gemini'?geminiSearch:studyPreferences.search)?'yes':'no');
   const reset=make('button','Reset study preferences');reset.type='button';
   reset.onclick=()=>{
-    for(const [name,value] of Object.entries({mode:'beginner',pace:'normal',difficulty:'auto',voiceStyle:'gentle',voiceEngine:'auto',searchDefault:'yes',tutor:'paws'})){
+    for(const [name,value] of Object.entries({mode:'beginner',pace:'normal',difficulty:'auto',voiceStyle:'gentle',voiceEngine:'auto',searchDefault:provider==='Gemini'?'no':'yes',tutor:'paws'})){
       const control=root.querySelector('[name="'+name+'"]');if(control)control.value=value;
     }
   };
@@ -623,9 +650,10 @@ function openLesson(item, autoplay = false) {
 function renderSources() {
   const root=$('sources');root.replaceChildren();
   const all=learning.sources(current?.sources);
-  if(!all.length&&!current?.searchRequested)return;
+  if(!all.length&&!current?.searchRequested&&!current?.searchNotice)return;
   const details=make('details');details.className='source-panel';
   details.append(make('summary','Sources & references ('+all.length+')'));
+  if(current.searchNotice)details.append(make('p',current.searchNotice));
   if(!all.length)details.append(make('p',current.searched?'The provider reported search activity but did not return source links.':'Web search was requested, but no source links were returned. Search is not confirmed.'));
   else {
     const providerCount=all.filter(s=>s.origin==='provider').length;
@@ -1298,7 +1326,7 @@ async function playVoice() {
       await audio.play();
       return;
     }
-    if (!localGateway && (current.demo || [custom,freeLLM,tokenHarbor,localAuto].includes(provider))) {
+    function speakBrowser() {
       if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
         stopVoice(); status('Speech playback is unavailable in this browser.', true); return;
       }
@@ -1333,7 +1361,9 @@ async function playVoice() {
       };
       localSpeechActive = true;
       speechSynthesis.speak(utterance);
-      return;
+    }
+    if (!localGateway && (current.demo || [custom,freeLLM,tokenHarbor,localAuto].includes(provider) || provider==='Gemini'&&(!geminiCloudVoice||geminiVoiceBlocked))) {
+      speakBrowser();return;
     }
     if (!localGateway && !key) { stopVoice(); settings(); return; }
     try {
@@ -1421,6 +1451,11 @@ async function playVoice() {
       await audio.play();
     } catch (error) {
       if (!request.signal.aborted) {
+        if(!localGateway&&provider==='Gemini'&&[403,404,429].includes(error.status)&&window.speechSynthesis&&window.SpeechSynthesisUtterance){
+          geminiVoiceBlocked=true;
+          status('Gemini speech quota or model unavailable. Using your device voice for this visit.');
+          speakBrowser();return;
+        }
         stopVoice();
         status(error.name === 'NotAllowedError' ? 'Press Play voice to start the narration.' : error.message, true);
       }
@@ -2025,8 +2060,8 @@ async function gemini(model, body, signal, apiKey = key) {
     method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
     body:JSON.stringify(body), signal
   });
-  const data = await response.json();
-  if (!response.ok) {const error=Error(data.error?.message || 'Gemini returned HTTP ' + response.status);error.status=response.status;throw error;}
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) throw learning.geminiFailure(model,response.status,data,Boolean(body.tools?.some(tool=>tool.google_search)));
   const candidate = data.candidates?.[0];
   if (!candidate?.content?.parts?.length) throw new Error('Gemini returned no content. ' + (data.promptFeedback?.blockReason || candidate?.finishReason || 'Try again.'));
   return candidate;
@@ -2046,16 +2081,30 @@ async function geminiLesson(topic, files, search, options) {
       parts.push({inlineData:{mimeType,data:url.slice(comma + 1)}});
     }
   }
-  const request = {systemInstruction:{parts:[{text:options.instructions}]},contents:[{role:'user',parts}]};
-  if (search) {
-    parts.push({text:'Use Google Search to research this topic before teaching it.'});
-    request.tools = [{google_search:{}}];
-  } else request.generationConfig = {responseMimeType:'application/json'};
-  const candidate = await gemini('gemini-flash-latest', request, options.signal, apiKey);
+  const model=geminiModel;
+  const requested=Boolean(search), grounded=requested&&geminiSearch;
+  const makeRequest=useSearch=>{
+    const request={systemInstruction:{parts:[{text:options.instructions}]},contents:[{role:'user',parts:[...parts]}]};
+    if(useSearch){
+      request.contents[0].parts.push({text:'Use Google Search to research this topic before teaching it.'});
+      request.tools=[{google_search:{}}];
+    }else request.generationConfig={responseMimeType:'application/json'};
+    return request;
+  };
+  let candidate,searchNotice=requested&&!grounded?'Google Search is disabled in Gemini settings. Lesson generated without live sources.':'';
+  try{candidate=await gemini(model,makeRequest(grounded),options.signal,apiKey);}
+  catch(error){
+    // Retry only a confirmed grounding-specific failure, never a model-wide daily/RPM limit.
+    if(!grounded||!error.groundingOnly||options.signal.aborted)throw error;
+    candidate=await gemini(model,makeRequest(false),options.signal,apiKey);
+    searchNotice='Google Search grounding was unavailable. Lesson generated without live sources.';
+  }
   const text = candidate.content.parts.filter(part => !part.thought).map(part => part.text || '').join('');
   const links = (candidate.groundingMetadata?.groundingChunks || []).filter(chunk => chunk.web?.uri);
-  return parseLesson({output:[{content:[{type:'output_text',text,annotations:links.map(({web}) =>
+  const lesson=parseLesson({output:[{content:[{type:'output_text',text,annotations:links.map(({web}) =>
     ({type:'url_citation',url:web.uri,title:web.title}))}]}]});
+  if(searchNotice)lesson.searchNotice=searchNotice;
+  return lesson;
 }
 
 async function geminiVoice(narration, signal) {
@@ -2098,12 +2147,13 @@ async function loadLaterSteps(task,topic,files,search) {
     current.questions.push(...remainder.questions);
     current.sources=learning.sources([...(current.sources||[]),...remainder.sources]);
     current.searched ||= remainder.searched;
+    if(remainder.searchNotice)current.searchNotice=remainder.searchNotice;
     saveLesson(current);
     renderSources();
     updateStepNavigation();
     updateSheets();
     if (task.waitVersion === boardVersion && !pausedForQuestion) showStep(first,true);
-    if (search && !current.sources.length) status('The API returned no source links for this lesson.');
+    if (search && !current.sources.length) status(current.searchNotice||'The API returned no source links for this lesson.');
   } catch (error) {
     if (continuation === task) {
       status('Later steps could not load. Your first step is saved. '+error.message,true);
@@ -2134,9 +2184,9 @@ $('start').onsubmit = asyncAction(async (run,payload) => {
   lesson.continuationPending=true;
   saveLesson(lesson);
   openLesson(lesson);
-  status(lesson.fallbackSlot ? 'First step generated using API ' + lesson.fallbackSlot + '.' : '');
+  status(lesson.searchNotice||(lesson.fallbackSlot ? 'First step generated using API ' + lesson.fallbackSlot + '.' : ''));
   continuation = {id:lesson.id};
-  void loadLaterSteps(continuation,subject,files,search);
+  void loadLaterSteps(continuation,subject,files,search&&!lesson.searchNotice);
   playVoice();
 },()=>({topic:$('topic').value.trim(),files:[...attachments],search:$('search').checked,mode:studyPreferences.mode}),()=>!$('home').hidden,'Retry original lesson');
 $('ask').onsubmit = asyncAction(async (run,payload) => {
