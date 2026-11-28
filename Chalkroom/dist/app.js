@@ -2157,7 +2157,7 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
   if (run !== operation || version !== boardVersion || parent !== current || !pausedForQuestion) return;
   const first = parent.steps.length;
   lessonTurns = [...lessonTurns, question];
-  current = {...parent, id:parent.id || crypto.randomUUID(), demo:false, turns:lessonTurns, mainStepCount:parent.mainStepCount ?? first,
+  current = {...parent, id:parent.id || crypto.randomUUID(), progressId:studyId(parent), demo:false, turns:lessonTurns, mainStepCount:parent.mainStepCount ?? first,
     steps:[...parent.steps, ...answer.steps], questions:[...parent.questions, ...answer.questions]};
   $('lesson-mode').textContent = 'TUTOR SESSION · '+learning.modes[learning.preferences({mode:current.learningMode}).mode].label.toUpperCase();
   saveLesson(current);
@@ -2169,7 +2169,7 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
 },()=>({question:$('question').value.trim(),parent:current,step:current?.steps[stepIndex],version:boardVersion}),p=>Boolean(p?.parent&&current===p.parent&&current.steps[stepIndex]===p.step&&boardVersion===p.version),'Retry original question');
 function studyId(lesson=current){
   if(!lesson)return null;
-  return lesson.id|| (lesson===sample?'sample-compound-interest':lesson.demo?'demo:'+String(lesson.title).slice(0,120):null);
+  return lesson.progressId||lesson.id|| (lesson===sample?'sample-compound-interest':lesson.demo?'demo:'+String(lesson.title).slice(0,120):null);
 }
 function recordProgress(event){
   const id=studyId();if(!id)return;
@@ -2184,10 +2184,8 @@ function recordPractice(question,value){
   recordProgress({kind:'review',question,correct:value==='got'});
 }
 function finishStudy(){
-  const total=current?.mainStepCount??current?.steps?.length??0;
   const id=studyId();
-  const recorded=progressData.lessons[id]?.steps||[];
-  const complete=!current?.continuationPending&&total>0&&Array.from({length:total},(_,i)=>i).every(i=>recorded.includes(i));
+  const complete=pawgress.canComplete(current,progressData.lessons[id]);
   if(complete)recordProgress({kind:'complete'});
   status(current?.continuationPending?'Opening step finished. Remaining lesson is not ready yet.':complete?'Lesson complete. Your session recap is ready.':'End of lesson reached. Review the other steps to complete it.');
   if(!sessionFinished){sessionFinished=true;showRecap(false);}
@@ -2234,12 +2232,12 @@ function showPawgress(){
   root.append(grid,make('h3','Achievement badges'));
   for(const badge of stats.badges){const row=make('div',(badge.earned?'★ ':'○ ')+badge.name);row.className='pawgress-badge';row.dataset.earned=String(badge.earned);root.append(row);}
   root.append(make('h3','Recent topics'));
-  const topics=Object.values(progressData.lessons).slice(-10).reverse();
+  const topics=Object.values(progressData.lessons).sort((a,b)=>b.lastStudied.localeCompare(a.lastStudied)).slice(0,10);
   if(!topics.length)root.append(make('p','Complete a step to start your learning trail.'));
   for(const item of topics)root.append(make('p',item.title+' · '+(item.complete?'Completed':item.steps.length+' steps completed')));
   const reset=make('button','Reset Pawgress');reset.type='button';reset.onclick=()=>{
     if(!window.confirm('Reset all local study statistics and badges? Saved lessons and preferences will stay.'))return;
-    progressData=pawgress.clean({});persist('pawgress',progressData);renderPawgressHome();$('modal').close();
+    progressData=pawgress.clean({});sessionSteps=new Set();sessionFinished=false;persist('pawgress',progressData);renderPawgressHome();$('modal').close();
   };root.append(reset);
 }
 function tutorPicker(root,initial,onChange){
@@ -2247,7 +2245,20 @@ function tutorPicker(root,initial,onChange){
   for(const [id,t] of Object.entries(pawgress.tutors)){
     const label=make('label');label.className='tutor-option';
     const input=make('input');input.type='radio';input.name='tutor';input.value=id;input.checked=initial===id;
-    const icon=make('span',({paws:'♧',captain:'★',astro:'✦',detective:'◇'})[id]);icon.className='tutor-symbol';icon.style.background=t.dark;
+    const icon=make('span');icon.className='tutor-symbol';icon.style.background=t.dark;icon.setAttribute('aria-hidden','true');
+    // Reuse the actual vector artwork for each choice without duplicate DOM ids.
+    const preview=$('dog-tutor').cloneNode(true);
+    const ids=new Map();
+    for(const node of [preview,...preview.querySelectorAll('[id]')]){
+      if(node.id){const previous=node.id;node.id='preview-'+id+'-'+previous;ids.set(previous,node.id);}
+    }
+    for(const node of preview.querySelectorAll('*'))for(const attr of ['fill','stroke','clip-path','mask','filter']){
+      const value=node.getAttribute(attr);
+      if(value){const replacement=value.replace(/url\(#([^)]*)\)/g,(whole,key)=>ids.has(key)?'url(#'+ids.get(key)+')':whole);if(replacement!==value)node.setAttribute(attr,replacement);}
+    }
+    preview.dataset.tutor=id;preview.removeAttribute('data-speaking');preview.removeAttribute('data-mood');preview.removeAttribute('role');preview.setAttribute('aria-hidden','true');
+    for(const [name,value] of Object.entries({fur:t.fur,shade:t.shade,ear:t.ear,earLight:t.earLight,background:t.background,dark:t.dark}))preview.style.setProperty('--tutor-'+name,value);
+    icon.append(preview);
     const info=make('span');info.append(make('strong',t.name),make('small',t.breed+' · '+t.description));
     label.append(input,icon,info);group.append(label);
     input.onchange=()=>{if(input.checked)onChange?.(id);};

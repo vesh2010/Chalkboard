@@ -181,3 +181,7 @@ body:has(#lesson:not([hidden])) #recovery:not([hidden]){position:fixed;right:20p
 #session-recap p,#session-recap li{line-height:1.5;font-size:14px}#session-recap h3{margin:14px 0 5px}#session-recap details{padding:7px 0;border-bottom:1px solid #c7d4bd}
 .recap-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:620px){#session-recap:not([hidden]){left:5%;width:90vw;top:13%;max-height:67dvh}.tutor-option{padding:8px}}
+
+.dog-avatar[data-tutor=astro] .astro-ears,.dog-avatar[data-tutor=detective] .detective-markings{display:inline}
+.dog-avatar[data-tutor=astro] .dog-ear{opacity:.35}
+.tutor-symbol{width:50px;height:50px;overflow:hidden}.tutor-symbol .dog-avatar *{animation:none!important}

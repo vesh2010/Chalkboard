@@ -16,7 +16,7 @@ window.chalkPawgress=(()=>{
     const lessons=Object.create(null);
     for(const [id,v] of Object.entries(raw.lessons||{}).slice(-500)){
       if(!v||typeof v!=='object'||!id||id.length>160)continue;
-      lessons[id]={title:String(v.title||'Untitled lesson').slice(0,180),steps:[...new Set((Array.isArray(v.steps)?v.steps:[]).filter(n=>Number.isInteger(n)&&n>=0&&n<500))],complete:v.complete===true};
+      lessons[id]={title:String(v.title||'Untitled lesson').slice(0,180),steps:[...new Set((Array.isArray(v.steps)?v.steps:[]).filter(n=>Number.isInteger(n)&&n>=0&&n<500))],complete:v.complete===true,lastStudied:typeof v.lastStudied==='string'?v.lastStudied.slice(0,32):''};
     }
     const reviewed=[...new Set((Array.isArray(raw.reviewed)?raw.reviewed:[]).filter(v=>typeof v==='string'&&v.length<=600))].slice(-2000);
     const correct=[...new Set((Array.isArray(raw.correct)?raw.correct:[]).filter(v=>reviewed.includes(v)))];
@@ -27,8 +27,9 @@ window.chalkPawgress=(()=>{
     if(typeof id!=='string'||!id||id.length>160||!['step','complete','review'].includes(event.kind))return p;
     if(event.kind==='step'&&(!Number.isInteger(event.step)||event.step<0||event.step>=500))return p;
     if(event.kind==='review'&&(typeof event.question!=='string'||!event.question))return p;
-    if(!p.lessons[id])p.lessons[id]={title:String(event.title||'Untitled lesson').slice(0,180),steps:[],complete:false};
+    if(!p.lessons[id])p.lessons[id]={title:String(event.title||'Untitled lesson').slice(0,180),steps:[],complete:false,lastStudied:''};
     const lesson=p.lessons[id];
+    lesson.lastStudied=date.toISOString();
     if(event.kind==='step'&&!lesson.steps.includes(event.step))lesson.steps.push(event.step);
     if(event.kind==='complete')lesson.complete=true;
     if(event.kind==='review'){
@@ -49,6 +50,11 @@ window.chalkPawgress=(()=>{
     return {streak,days:set.size,completed,steps,reviewed:p.reviewed.length,correct:p.correct.length,
       badges:[{name:'First pawprint',earned:steps>0||p.reviewed.length>0},{name:'Lesson explorer',earned:completed>=1},{name:'Three-day trail',earned:streak>=3},{name:'Practice pal',earned:p.reviewed.length>=5},{name:'Curious companion',earned:completed>=5}]};
   }
+  function canComplete(lesson,progress){
+    const total=lesson?.mainStepCount??lesson?.steps?.length??0;
+    const steps=new Set(progress?.steps||[]);
+    return !lesson?.continuationPending&&Number.isInteger(total)&&total>0&&total<=500&&Array.from({length:total},(_,i)=>i).every(i=>steps.has(i));
+  }
   function recap(lesson,progress,sessionSteps,attempts,learning){
     const steps=(lesson?.steps||[]).slice(0,lesson?.mainStepCount??lesson?.steps?.length??0);
     const covered=steps.map((s,i)=>({step:s,index:i})).filter(v=>sessionSteps.has(v.index));
@@ -64,5 +70,5 @@ window.chalkPawgress=(()=>{
     const questions=learning.questions(lesson?.questions).slice(0,9);
     return {title:lesson?.title||'Lesson',covered:covered.length,total:steps.length,points:points.slice(0,8),mistakes:mistakes.slice(0,4),questions,reviewed:attempts.size,correct:[...attempts.values()].filter(x=>x==='got').length,complete:progress?.complete===true};
   }
-  return {tutors,tutor,tutorId,day,previousDay,clean,record,stats,recap};
+  return {tutors,tutor,tutorId,day,previousDay,clean,record,stats,canComplete,recap};
 })();
