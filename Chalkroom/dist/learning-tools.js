@@ -1,7 +1,7 @@
 // Small pure helpers shared by lesson playback and practice.
 window.chalkLearning = (() => {
   const levels = ['easy','medium','challenge'];
-  const normalize = level => typeof level === 'string' && levels.includes(level.toLowerCase()) ? level.toLowerCase() : 'review';
+  const normalize = level => typeof level === 'string' && levels.includes(level.trim().toLowerCase()) ? level.trim().toLowerCase() : 'review';
   function questions(items) {
     return (Array.isArray(items) ? items : []).filter(q=>typeof q?.prompt==='string' && q.prompt.trim() && typeof q.answer==='string' && q.answer.trim()).map(q=>({
       prompt:q.prompt.trim(),answer:q.answer.trim(),difficulty:normalize(q.difficulty),
@@ -15,8 +15,8 @@ window.chalkLearning = (() => {
   }
   function position(point, player) {
     if (!point) return null;
-    const time = player && player === point.player && Number.isFinite(player.currentTime) ? player.currentTime : point.time || 0;
-    const {player:discard,...saved}=point;
+    const time = player && player === point.player && !point.seeking && Number.isFinite(player.currentTime) ? player.currentTime : point.time || 0;
+    const {player:discard,seeking:pending,...saved}=point;
     return {...saved,time};
   }
   function compatible(point, step, cue, voice, style, provider) {

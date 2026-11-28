@@ -1019,7 +1019,13 @@ async function playVoice() {
     playbackPoint.player=player;
     playbackPoint.time=time;
     if(time>0) {
-      const seek=()=>{ if(!request.signal.aborted) { try {player.currentTime=learning.offset(time,player.duration);} catch {} } };
+      const point=playbackPoint;
+      point.seeking=true;
+      const seek=()=>{
+        if(request.signal.aborted || playbackPoint!==point) return;
+        try {player.currentTime=learning.offset(time,player.duration);point.seeking=false;}
+        catch {point.seeking=false;}
+      };
       if(player.readyState>=1) seek(); else player.addEventListener('loadedmetadata',seek,{once:true,signal:request.signal});
     }
   }
@@ -1069,6 +1075,13 @@ async function playVoice() {
     checkpoint(cuePosition);
     const narration = cue.text;
     window.dogTutor?.setMood('thinking');
+    let insightShown=false;
+    function reactToInsight() {
+      if (!insightShown && /\b(?:key idea|key insight|important point|remember|the trick|notice how|the reason is)\b/i.test(narration)) {
+        insightShown=true;
+        window.dogTutor?.setMood('insight',1900);
+      }
+    }
     function beginWriting() {
       if (request.signal.aborted) return;
       displayCue(cue);
@@ -1157,8 +1170,9 @@ async function playVoice() {
       utterance.pitch = style.pitch;
       utterance.onstart = () => {
         if (request.signal.aborted) return;
-        beginWriting();
+        if(char>0) displayCue(cue); else beginWriting();
         window.dogTutor?.speech();
+        reactToInsight();
       };
       utterance.onboundary = event => {
         if (!request.signal.aborted) {
@@ -1252,6 +1266,7 @@ async function playVoice() {
           writingStarted = true;
         }
         window.dogTutor?.media(player,profile);
+        reactToInsight();
       };
       player.onpause = player.onwaiting = () => {
         if (audio === player) window.dogTutor?.stop();
@@ -2062,8 +2077,10 @@ function renderPractice() {
         const extra=learning.questions(result.questions).filter(q=>q.difficulty===requested);
         if(!extra.length)throw Error('The tutor did not return questions at the selected difficulty. Please try again.');
         owner.questions=learning.mergeQuestions(owner.questions||[],extra);saveLesson(owner);
-        if(!panel.hidden&&epoch===practiceEpoch)renderPractice();
-        window.dogTutor?.setMood('insight',2200);
+        if(!panel.hidden&&epoch===practiceEpoch){
+          renderPractice();
+          window.dogTutor?.setMood('insight',2200);
+        }
       }catch(error){if(run===operation&&current===owner){status(error.message,true);generate.disabled=false;generate.textContent='Retry question generation';}}
       finally{if(run===operation){busy=false;if(generate.isConnected&&generate.disabled){generate.disabled=false;generate.textContent='Generate more '+labels[requested].toLowerCase()+' questions';}}}
     };

@@ -27,7 +27,7 @@ window.dogTutor = (() => {
     cancelAnimationFrame(frame);
     avatar?.removeAttribute('data-speaking');
     mouth(0);
-    if (mood==='speaking') setMood('idle');
+    if (mood==='speaking'||mood==='insight') setMood('idle');
   }
   async function analyse(blob) {
     if (!window.OfflineAudioContext || !blob) return null;
