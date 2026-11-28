@@ -62,12 +62,38 @@ window.chalkLearning = (() => {
     }
     return [...found.values()].sort((a,b)=>Number(b.origin==='provider')-Number(a.origin==='provider')).slice(0,80);
   }
+  function geminiFailure(model,status,payload,search=false) {
+    const details=Array.isArray(payload?.error?.details)?payload.error.details:[];
+    const violations=details.flatMap(d=>Array.isArray(d?.violations)?d.violations:[]);
+    const safe=v=>typeof v==='string' ? v.replace(/[^a-zA-Z0-9_.:/ -]/g,'').slice(0,180):'';
+    const ids=violations.map(v=>safe(v?.quotaId||v?.quotaMetric)).filter(Boolean);
+    const metrics=violations.map(v=>[v?.quotaId,v?.quotaMetric].filter(Boolean).join(' ')).join(' ');
+    const models=[...new Set(violations.map(v=>safe(v?.quotaDimensions?.model)).filter(Boolean))];
+    const zero=violations.some(v=>v?.quotaValue!==undefined&&String(v.quotaValue)==='0');
+    const raw=String(payload?.error?.message||'');
+    const grounding=/grounding|google.search|search.request/i.test(metrics+' '+raw);
+    const textQuota=/generate.?requests|generate.?content|input.?token|output.?token/i.test(metrics);
+    const groundingOnly=search&&!textQuota&&grounding&&[400,403,429].includes(status);
+    const daily=/per.?day|daily|requestsperday/i.test(metrics);
+    const retry=details.find(d=>typeof d?.retryDelay==='string')?.retryDelay;
+    const delay=/^\d+(?:\.\d+)?s$/.test(retry||'')?Math.ceil(parseFloat(retry)):null;
+    let message='Gemini '+model+' (HTTP '+status+'). ';
+    if(status===429){
+      message+=groundingOnly?'Google Search grounding quota is unavailable.':zero?'This project has zero quota for the requested model or feature.':daily?'The daily quota is exhausted.':'The requested model or feature hit a quota limit.';
+      if(models.length)message+=' Quota model: '+models.join(', ')+'.';
+      if(ids.length)message+=' Quota: '+ids.slice(0,3).join(', ')+'.';
+      if(delay!==null&&!daily&&!zero)message+=' Google suggests retrying after '+delay+' seconds.';
+      message+=' Check the exact model and project in AI Studio.';
+    }else if(groundingOnly)message+='Google Search grounding is unavailable for this project.';
+    else message+=raw.slice(0,350)||'Request failed.';
+    const error=Error(message);error.status=status;error.model=model;error.groundingOnly=groundingOnly;error.dailyQuota=daily;error.zeroQuota=zero;error.retrySeconds=delay;return error;
+  }
   function recovery(error) {
     const msg=String(error?.message||error||'').toLowerCase(), code=Number(error?.status||(/\bhttp\s+(\d{3})\b/.exec(msg)||[])[1]);
     if(error?.code==='cancelled'||/\b(cancelled|canceled|aborted)\b/.test(msg))return {kind:'cancelled',hint:'The request was cancelled. You can submit it again.',retry:false};
     if([401,403].includes(code)||/rejected.*key|unauthoriz|invalid.*api key|authentication|api.key.*invalid|api key is missing/.test(msg))return {kind:'auth',hint:'Open API settings and test or replace the key, then retry the same request.',retry:true,settings:true};
     if(code===402||/balance|insufficient.quota|credits/.test(msg))return {kind:'quota',hint:'Check provider credits or choose a configured alternative in API settings.',retry:true,settings:true};
-    if(code===429||/rate.limit|too many requests/.test(msg))return {kind:'rate',hint:'Wait briefly for the provider limit to reset, then retry. You can also choose another configured provider.',retry:true,settings:true};
+    if(code===429||/rate.limit|too many requests/.test(msg))return {kind:'rate',hint:error?.zeroQuota?'The requested model or feature has zero quota for this project. Check the model and tier in API settings; waiting will not unlock access.':error?.dailyQuota?'Daily quota exhausted. Wait for the daily reset or select an eligible configured provider.':error?.retrySeconds!=null?'Wait at least '+error.retrySeconds+' seconds before retrying. Check the exact model in AI Studio.':'Check the model-specific quota and project in AI Studio. Wait briefly before retrying, or choose an eligible provider.',retry:true,settings:true};
     if(error?.code==='timeout'||code===408||code===504||/timed? ?out|timeout|took more than|deadline/.test(msg))return {kind:'timeout',hint:'The model took too long. Check gateway status or select faster routing, then retry.',retry:true,settings:true,fast:true};
     if(code===404||/model.*not found|could not route/.test(msg))return {kind:'model',hint:'Check the configured model and gateway URL in API settings.',retry:true,settings:true};
     if(/no backup|add at least one api key|add another provider/.test(msg))return {kind:'gateway',hint:'Check the local .env provider configuration and restart the gateway if needed.',retry:true,settings:true};
@@ -75,5 +101,5 @@ window.chalkLearning = (() => {
     if(code>=500||/could not reach|could not connect|network|failed to fetch|gateway closed|unavailable/.test(msg))return {kind:'network',hint:'Check your connection and local gateway, or choose another provider before retrying.',retry:true,settings:true};
     return {kind:'other',hint:'Check the message above, then try again if appropriate.',retry:true};
   }
-  return {levels,normalize,questions,mergeQuestions,position,compatible,offset,modes,defaultPreferences,paceRates,preferences,cards,sources,recovery};
+  return {levels,normalize,questions,mergeQuestions,position,compatible,offset,modes,defaultPreferences,paceRates,preferences,cards,sources,recovery,geminiFailure};
 })();

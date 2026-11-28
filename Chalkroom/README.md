@@ -185,3 +185,7 @@ Pawgress retains up to 730 study dates, 500 lesson records and 2,000 reviewed qu
 ## API regression and live smoke tests
 
 Run `node --test tests/api-regression.test.mjs` from Chalkroom with Node 22+. The regression suite exercises the actual lesson adapters and router against deterministic mocked responses; it does not call paid APIs. Run the local app, then `node tests/live-api-smoke.mjs --auto` for configured .env fallback providers, or set `CHALKROOM_TEST_KEY` privately in your terminal and run `node tests/live-api-smoke.mjs` for FreeLLMAPI. The live script asks before sending six requests and may use credits. It checks response structure, not factual teaching quality or audio.
+
+### Gemini free-tier quota settings
+
+Chalkroom now defaults to the exact `gemini-3.6-flash` model rather than the rolling Flash alias. Set the model ID in API settings to match your own AI Studio project. Google Search grounding defaults off for Gemini (separate from other providers); turn it on only if your project has eligible grounding quota. Confirmed grounding-only errors can retry once without search and disclose missing live sources. Text-model 429s are not automatically retried. Error messages show model, quota IDs, zero/daily limits and retry delay when supplied. Local Chalkroom continues using its selected neural voice engine, independent of Gemini text quota. Web-only Gemini uses device speech by default; optional cloud speech falls back to device speech for quota/access errors. Browser voice quality depends on installed voices.
