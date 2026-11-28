@@ -5,6 +5,7 @@ import {gzipSync} from 'node:zlib';
 import {parseEnv} from 'node:util';
 import {loadRoutes,tryRoutes,gatewayLesson} from './fallback.mjs';
 import {speak} from './voice.mjs';
+import {voiceStyle,voiceStyles} from './voice-styles.mjs';
 
 const host = '127.0.0.1';
 const port = 31416;
@@ -14,6 +15,7 @@ const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/audio-cache.js', ['audio-cache.js', 'text/javascript']],
+  ['/voice-styles.js', ['voice-styles.js', 'text/javascript']],
   ['/pen-font.js', ['pen-font.js','text/javascript']],
   ['/live-board.js', ['live-board.js','text/javascript']],
   ['/teacher-face.js', ['teacher-face.js','text/javascript']],
@@ -128,33 +130,42 @@ const server = createServer(async (req, res) => {
       chunks.push(chunk);
     }
     if (speech) {
-      let text,voice;
-      try { ({text,voice} = JSON.parse(Buffer.concat(chunks).toString())); } catch {}
-      if (voice !== undefined && !['ryan','alan','cori','storyteller','elevenlabs'].includes(voice)) return send(res,400,'{}');
-      if (typeof text !== 'string' || !text.trim() || text.length > 12000) return send(res,400,'{}');
-      if (voice === 'elevenlabs') {
+      let text,voice='auto',style='gentle';
+      try { const input = JSON.parse(Buffer.concat(chunks).toString()); ({text,voice='auto',style='gentle'} = input); } catch {}
+      if (!['auto','ryan','alan','cori','storyteller','elevenlabs'].includes(voice) || !Object.hasOwn(voiceStyles,style)) return send(res,400,JSON.stringify({error:'Invalid voice or delivery style.'}));
+      if (typeof text !== 'string' || !text.trim() || text.length > 12000) return send(res,400,JSON.stringify({error:'Invalid narration text.'}));
+      const preset=voiceStyle(style);
+      if (voice==='auto' || voice==='elevenlabs') {
         const env = parseEnv(await readFile(new URL('./.env',import.meta.url),'utf8').catch(()=>''));
         const key = env.ELEVENLABS_API_KEY?.trim();
         const id = env.ELEVENLABS_VOICE_ID?.trim();
-        if (!key || !id) return send(res,400,JSON.stringify({error:'Set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID in the Chalkroom .env file, then press Play voice.'}));
-        const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(id),{
-          method:'POST',signal:controller.signal,redirect:'error',
-          headers:{'xi-api-key':key,'Content-Type':'application/json',Accept:'audio/mpeg'},
-          body:JSON.stringify({text,model_id:'eleven_multilingual_v2',
-            voice_settings:{stability:0.40,similarity_boost:0.50,style:0.20,use_speaker_boost:true,speed:0.97}})
-        });
-        if (!response.ok) return send(res,502,JSON.stringify({error:'ElevenLabs returned HTTP ' + response.status + '. Check your voice ID, key permissions and credits.'}));
-        return send(res,200,Buffer.from(await response.arrayBuffer()),'audio/mpeg');
+        if (key && id) {
+          const cacheKey=createHash('sha256').update(JSON.stringify(['elevenlabs-v2',id,key,style,text])).digest('hex');
+          const hit=cachedVoice(cacheKey);
+          if (hit) return send(res,200,hit,'audio/mpeg');
+          const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(id),{
+            method:'POST',signal:controller.signal,redirect:'error',
+            headers:{'xi-api-key':key,'Content-Type':'application/json',Accept:'audio/mpeg'},
+            body:JSON.stringify({text,model_id:'eleven_multilingual_v2',
+              voice_settings:{stability:preset.stability,similarity_boost:0.75,style:preset.expressiveness,use_speaker_boost:true,speed:preset.speed}})
+          });
+          if (!response.ok) return send(res,502,JSON.stringify({error:'ElevenLabs returned HTTP ' + response.status + '. Check your voice ID, key permissions and credits, or choose Cori local neural voice explicitly.'}));
+          const clip=Buffer.from(await response.arrayBuffer());
+          if (!controller.signal.aborted) cacheVoice(cacheKey,clip);
+          return send(res,200,clip,'audio/mpeg');
+        }
+        if (voice==='elevenlabs') return send(res,400,JSON.stringify({error:'Set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID in Chalkroom/.env, or select Auto or Cori in the lesson voice settings.'}));
+        voice='cori';
       }
       try {
-        const cacheKey = createHash('sha256').update((voice || 'cori') + '\0' + text).digest('hex');
+        const cacheKey = createHash('sha256').update(JSON.stringify(['piper-v2',voice,style,text])).digest('hex');
         const hit = cachedVoice(cacheKey);
         if (hit) return send(res,200,hit,'audio/wav');
-        const wav = await speak(text,controller.signal,voice);
+        const wav = await speak(text,controller.signal,voice,style);
         if (!controller.signal.aborted) cacheVoice(cacheKey,wav);
         return send(res,200,wav,'audio/wav');
       }
-      catch { if (!res.destroyed) send(res,503,'{}'); return; }
+      catch { if (!res.destroyed) send(res,503,JSON.stringify({error:'Local neural voice is unavailable. Check the Piper executable and Cori/Ryan/Alan model files, or configure ElevenLabs for natural narration.'})); return; }
     }
     if (auto) {
       let messages;
