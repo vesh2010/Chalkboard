@@ -26,9 +26,9 @@ function hasLesson(data) {
   if (typeof answer !== 'string' || !answer.includes('{')) return false;
   try {
     const lesson = JSON.parse(answer.slice(answer.indexOf('{'),answer.lastIndexOf('}')+1));
-    return typeof lesson?.title === 'string' && Array.isArray(lesson.steps) && lesson.steps.length > 0 &&
-      lesson.steps.every(step => typeof step?.title === 'string' && typeof step.narration === 'string' &&
-        Array.isArray(step.lines) && step.lines.every(line => typeof line === 'string'));
+    return typeof lesson?.title === 'string' && Boolean(lesson.title.trim()) && Array.isArray(lesson.steps) && lesson.steps.length > 0 &&
+      lesson.steps.every(step => typeof step?.title === 'string' && Boolean(step.title.trim()) && typeof step.narration === 'string' && Boolean(step.narration.trim()) &&
+        Array.isArray(step.lines) && step.lines.length > 0 && step.lines.every(line => typeof line === 'string' && Boolean(line.trim())));
   } catch { return false; }
 }
 
@@ -104,6 +104,7 @@ export async function gatewayLesson(body, authorization, upstream, signal, getRo
   const primaryBudgetMs = routes.length ? 55000 : Math.max(1000, deadline - Date.now() - 5000);
   const primaryLimit = AbortSignal.timeout(primaryBudgetMs);
   let status = 502;
+  let invalidLesson = false;
   try {
     const response = await request(upstream,{method:'POST',redirect:'error',
       headers:{Authorization:authorization,'Content-Type':'application/json'},body,
@@ -111,26 +112,32 @@ export async function gatewayLesson(body, authorization, upstream, signal, getRo
     // A gateway token can be revoked or rotated during a lesson. If local
     // backup providers are configured, let them handle authentication errors
     // instead of ending the learner's follow-up with an immediate 401.
-    if (![401,403,408,429].includes(response.status) && response.status < 500) {
+    if (response.status >= 200 && response.status < 300) {
+      const raw=await response.text();
+      signal.throwIfAborted();
+      let parsed;try{parsed=JSON.parse(raw);}catch{}
+      if(hasLesson(parsed))return {status:response.status,body:raw};
+      invalidLesson=true;status=502;
+    } else if (![401,403,408,429].includes(response.status) && response.status < 500) {
       return {status:response.status,body:await response.text()};
-    }
-    status = response.status;
+    } else status = response.status;
     if ([401,403].includes(status)) {
       if (!routes.length) {
         return {status,body:JSON.stringify({error:{message:'FreeLLMAPI rejected the saved gateway key (HTTP ' + status + '). Open API settings, test the key, and paste a current unified key from the FreeLLMAPI desktop app.'}})};
       }
     }
-    await response.body?.cancel();
+    if(!invalidLesson)await response.body?.cancel();
   } catch { signal.throwIfAborted(); }
-  const primaryTimedOut = primaryLimit.aborted;
+  signal.throwIfAborted();
+  const primaryTimedOut = primaryLimit.aborted || status===408 || status===504;
   const result = routes.length
     ? await tryRoutes(routes,messages,signal,request,deadline-Date.now(),onBackup)
     : {error:{message:'No backup providers configured.'}};
   if (!result.error) return {status:200,body:JSON.stringify(result)};
-  const reason = primaryTimedOut ? 'timed out' : [401,403].includes(status) ? 'rejected the saved key (HTTP ' + status + ')' : 'is unavailable (HTTP ' + status + ')';
+  const reason = primaryTimedOut ? 'timed out' : invalidLesson ? 'returned an unreadable or incomplete lesson' : [401,403].includes(status) ? 'rejected the saved key (HTTP ' + status + ')' : 'is unavailable (HTTP ' + status + ')';
   const detail = routes.length ? result.error.message
     : primaryTimedOut
       ? 'The gateway did not complete within ' + Math.round(primaryBudgetMs / 1000) + ' seconds. Check whether FreeLLMAPI has an active model, select Fast routing in API settings, or add a backup provider to Chalkroom/.env.'
       : 'Add another provider to Chalkroom/.env for automatic fallback.';
-  return {status:502,body:JSON.stringify({error:{message:'The primary gateway ' + reason + '. ' + detail}})};
+  return {status:primaryTimedOut?504:invalidLesson?502:([401,403,429].includes(status)?status:502),body:JSON.stringify({error:{message:'The primary gateway ' + reason + '. ' + detail}})};
 }

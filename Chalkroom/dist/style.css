@@ -160,3 +160,28 @@ body:has(#lesson:not([hidden]))>.sidebar,body:has(#lesson:not([hidden])) main>he
 .recovery-actions button{font-size:12px;padding:7px 10px}
 body:has(#lesson:not([hidden])) #recovery:not([hidden]){position:fixed;right:20px;bottom:95px;z-index:9;width:min(420px,90vw);box-shadow:0 8px 24px #0b291c45}
 @media(max-width:620px){.study-mode-picker{grid-template-columns:1fr}.study-mode-picker select{max-width:none}body:has(#lesson:not([hidden])) #recovery:not([hidden]){right:5vw;bottom:84px}}
+
+/* Batch 4: character themes, session recap and study trail. */
+.dog-avatar .tutor-bg-light{stop-color:var(--tutor-background,#4c8871)}.dog-avatar .tutor-bg-dark{stop-color:var(--tutor-dark,#163d34)}
+.dog-avatar .tutor-fur-light{stop-color:var(--tutor-fur,#f7d99c)}.dog-avatar .tutor-fur-dark{stop-color:var(--tutor-shade,#d99b53)}
+.dog-avatar .tutor-ear-dark{stop-color:var(--tutor-ear,#a85f30)}.dog-avatar .tutor-ear-light{stop-color:var(--tutor-earLight,#df9b50)}
+.tutor-accessory{display:none}
+.dog-avatar[data-tutor=captain] .captain-cap,.dog-avatar[data-tutor=astro] .astro-helmet,.dog-avatar[data-tutor=detective] .detective-hat{display:inline}
+.dog-avatar[data-tutor=captain] .tutor-glasses,.dog-avatar[data-tutor=astro] .tutor-glasses{display:none}
+.dog-avatar[data-tutor=captain] .tutor-bow{fill:#456f9e}.dog-avatar[data-tutor=astro] .tutor-bow{fill:#6d68a8}.dog-avatar[data-tutor=detective] .tutor-bow{fill:#8c623b}
+.tutor-picker{display:grid;gap:8px;border:0;padding:0;margin:12px 0}
+.tutor-option{display:flex!important;align-items:center;gap:10px;background:#f7f6eb;border:1px solid #c7d4bd;border-radius:10px;padding:10px;cursor:pointer}
+.tutor-option:has(input:checked){border-color:#548a6d;background:#e5efdb}
+.tutor-option input{width:auto!important;margin:0!important}.tutor-option strong,.tutor-option small{display:block}.tutor-option small{font-size:12px;color:#456351}
+.tutor-symbol{color:#fff2cd;border-radius:50%;width:34px;height:34px;display:grid;place-items:center;flex:none;font-size:20px}
+.pawgress-home{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:12px 0;color:#385d4c;font-size:13px}
+.pawgress-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0}.pawgress-grid>div{display:grid;padding:12px;background:#edf2e4;border:1px solid #c7d4bd;border-radius:10px}.pawgress-grid strong{font-size:24px;color:#285e49}.pawgress-grid small{color:#456351}
+.pawgress-badge{padding:7px 0;border-bottom:1px solid #ccd7c6;color:#5b6b60}.pawgress-badge[data-earned=true]{color:#2c684d;font-weight:650}
+#session-recap:not([hidden]){position:absolute;z-index:5;left:6%;top:12%;width:min(580px,88vw);max-height:72dvh;overflow:auto;padding:18px;border-radius:16px;background:#f8f6e9;color:#1b3e32;box-shadow:0 14px 45px #0d291d66}
+#session-recap p,#session-recap li{line-height:1.5;font-size:14px}#session-recap h3{margin:14px 0 5px}#session-recap details{padding:7px 0;border-bottom:1px solid #c7d4bd}
+.recap-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+@media(max-width:620px){#session-recap:not([hidden]){left:5%;width:90vw;top:13%;max-height:67dvh}.tutor-option{padding:8px}}
+
+.dog-avatar[data-tutor=astro] .astro-ears,.dog-avatar[data-tutor=detective] .detective-markings{display:inline}
+.dog-avatar[data-tutor=astro] .dog-ear{opacity:.35}
+.tutor-symbol{width:50px;height:50px;overflow:hidden}.tutor-symbol .dog-avatar *{animation:none!important}

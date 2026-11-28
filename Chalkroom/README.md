@@ -171,3 +171,17 @@ Choose Beginner, School, Competitive exam or Fast revision before starting a new
 Open the lesson menu for concept cards (definition, formula, rule, example, mistake or takeaway). New lessons may include AI-generated cards; older lessons use their existing board points without another API request. Cards are copyable. Sources distinguish provider citations from AI-suggested or older unverified links. Chalkroom does not independently verify citations; no link is proof of web search by itself.
 
 When a lesson start or follow-up fails, the recovery panel keeps the original topic, attachments, mode or question in memory for a deliberate retry. A failed continuation can also be retried without replacing the opening step. API settings and faster FreeLLMAPI routing are offered for applicable errors. No unattended retries or provider changes occur; retries may use provider credits. Retry state is session-only and stale requests are rejected when the learner changes lessons or steps.
+
+## Professor Paws — Batch 4
+
+Choose Professor Paws, Captain Canine, Astro Pup or Detective Doggo from the home navigation or lesson menu. Each character has its own vector theme, accessories, personality prompt and recommended delivery style. The selected voice engine stays the same, including the optional ElevenLabs configuration; character selection does not invent new voice IDs. Voice style can be overridden independently.
+
+Session recap is available from the lesson menu and when playback reaches the end. It collects existing board points, mistake cards and practice questions without additional AI calls. It distinguishes steps completed this visit from material available for review. Pawgress records local calendar study days, completed teaching steps, completed lessons and self-reviewed practice answers, deduplicating lesson steps and questions. A lesson counts as complete only after all main steps have been played through and no continuation is pending. Streaks are browser-local; no accounts, analytics service or automatic grading. Reset Pawgress does not delete lessons or preferences.
+
+First-run onboarding is optional and prefilled with existing settings. Choose a tutor, recommended voice style (or override it), goal, mode and pace, or skip. Preferences can be changed later. Existing prerecorded sample narration is not regenerated.
+
+Pawgress retains up to 730 study dates, 500 lesson records and 2,000 reviewed question identifiers in local browser storage to keep storage bounded. The most recent topic list uses the last recorded activity time. The tutor chooser uses previews of the actual vector character artwork.
+
+## API regression and live smoke tests
+
+Run `node --test tests/api-regression.test.mjs` from Chalkroom with Node 22+. The regression suite exercises the actual lesson adapters and router against deterministic mocked responses; it does not call paid APIs. Run the local app, then `node tests/live-api-smoke.mjs --auto` for configured .env fallback providers, or set `CHALKROOM_TEST_KEY` privately in your terminal and run `node tests/live-api-smoke.mjs` for FreeLLMAPI. The live script asks before sending six requests and may use credits. It checks response structure, not factual teaching quality or audio.

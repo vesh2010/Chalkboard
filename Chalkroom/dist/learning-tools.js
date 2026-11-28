@@ -71,8 +71,8 @@ window.chalkLearning = (() => {
     if(error?.code==='timeout'||code===408||code===504||/timed? ?out|timeout|took more than|deadline/.test(msg))return {kind:'timeout',hint:'The model took too long. Check gateway status or select faster routing, then retry.',retry:true,settings:true,fast:true};
     if(code===404||/model.*not found|could not route/.test(msg))return {kind:'model',hint:'Check the configured model and gateway URL in API settings.',retry:true,settings:true};
     if(/no backup|add at least one api key|add another provider/.test(msg))return {kind:'gateway',hint:'Check the local .env provider configuration and restart the gateway if needed.',retry:true,settings:true};
+    if(/readable lesson|incomplete lesson|incomplete whiteboard|response field|no practice questions/.test(msg))return {kind:'response',hint:'The provider returned an incomplete or incompatible lesson. Retry or try another model.',retry:true,settings:true};
     if(code>=500||/could not reach|could not connect|network|failed to fetch|gateway closed|unavailable/.test(msg))return {kind:'network',hint:'Check your connection and local gateway, or choose another provider before retrying.',retry:true,settings:true};
-    if(/readable lesson|incomplete whiteboard|response field/.test(msg))return {kind:'response',hint:'The provider returned an incomplete or incompatible lesson. Retry or try another model.',retry:true,settings:true};
     return {kind:'other',hint:'Check the message above, then try again if appropriate.',retry:true};
   }
   return {levels,normalize,questions,mergeQuestions,position,compatible,offset,modes,defaultPreferences,paceRates,preferences,cards,sources,recovery};
