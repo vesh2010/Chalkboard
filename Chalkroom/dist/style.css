@@ -138,3 +138,25 @@ body:has(#lesson:not([hidden]))>.sidebar,body:has(#lesson:not([hidden])) main>he
 .practice-list button[aria-pressed=true]{background:#d4e5b9}
 @media(max-width:760px){#board li,#board li:has(.ink-sheet){margin-bottom:9px;padding-block:6px}.practice-levels button{padding:8px}}
 @media(prefers-reduced-motion:reduce){.dog-avatar *{animation:none!important;transition:none!important}}
+
+/* Batch 3: study settings, concept cards, provenance-aware references and recovery. */
+.study-mode-picker{display:grid;grid-template-columns:1fr minmax(140px,1fr);gap:6px 12px;align-items:center;margin:12px 0}
+.study-mode-picker select{width:100%;max-width:310px}
+#study-mode-note{grid-column:1/-1;margin:0;font-size:12px;line-height:1.5;color:#456351}
+#lesson-panel .concept-panel,#lesson-panel .source-panel{margin:12px 0}
+.concept-panel>summary,.source-panel>summary{font-weight:650;cursor:pointer}
+.concept-card,.source-card{display:grid;gap:5px;background:#fffdf3;border:1px solid #c4d3bd;border-radius:10px;padding:10px;margin:8px 0;overflow-wrap:anywhere}
+.concept-card{border-left:3px solid #44856c}.concept-card[data-kind="formula"]{border-left-color:#af7e32}.concept-card[data-kind="mistake"]{border-left-color:#ad5e41}
+.concept-card small,.source-meta{font:600 10px/1.4 system-ui;text-transform:uppercase;letter-spacing:.06em;color:#456351}
+.concept-card p,.source-panel p{font-size:13px;line-height:1.5;margin:0}
+.concept-card[data-kind="formula"] p{font-size:16px;font-family:Georgia,serif}
+.concept-card span{font-size:12px;color:#456351}
+.concept-card button{justify-self:start;font-size:11px;padding:4px 9px}
+.source-card a{font-size:13px;line-height:1.4;color:#175745;white-space:normal;overflow-wrap:anywhere}
+.source-badge{justify-self:start;font:600 10px/1.4 system-ui;background:#e8e8db;color:#3d5447;padding:3px 6px;border-radius:5px}
+#recovery{max-width:720px;margin:8px auto;padding:12px 16px;border:1px solid #b8c8ad;background:#faf7e8;color:#284a3c;border-radius:10px}
+#recovery-hint{font-size:13px;line-height:1.45;margin:0 0 8px}
+.recovery-actions{display:flex;flex-wrap:wrap;gap:6px}
+.recovery-actions button{font-size:12px;padding:7px 10px}
+body:has(#lesson:not([hidden])) #recovery:not([hidden]){position:fixed;right:20px;bottom:95px;z-index:9;width:min(420px,90vw);box-shadow:0 8px 24px #0b291c45}
+@media(max-width:620px){.study-mode-picker{grid-template-columns:1fr}.study-mode-picker select{max-width:none}body:has(#lesson:not([hidden])) #recovery:not([hidden]){right:5vw;bottom:84px}}
