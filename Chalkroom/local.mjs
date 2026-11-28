@@ -17,6 +17,7 @@ const files = new Map([
   ['/audio-cache.js', ['audio-cache.js', 'text/javascript']],
   ['/voice-styles.js', ['voice-styles.js', 'text/javascript']],
   ['/learning-tools.js', ['learning-tools.js', 'text/javascript']],
+  ['/pawgress.js', ['pawgress.js', 'text/javascript']],
   ['/pen-font.js', ['pen-font.js','text/javascript']],
   ['/live-board.js', ['live-board.js','text/javascript']],
   ['/teacher-face.js', ['teacher-face.js','text/javascript']],
