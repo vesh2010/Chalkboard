@@ -60,15 +60,15 @@ window.chalkLearning = (() => {
       const previous=found.get(url.href);
       if(!previous||origin==='provider'&&previous.origin!=='provider')found.set(url.href,next);
     }
-    return [...found.values()].slice(0,80);
+    return [...found.values()].sort((a,b)=>Number(b.origin==='provider')-Number(a.origin==='provider')).slice(0,80);
   }
   function recovery(error) {
     const msg=String(error?.message||error||'').toLowerCase(), code=Number(error?.status||(/\bhttp\s+(\d{3})\b/.exec(msg)||[])[1]);
     if(error?.code==='cancelled'||/\b(cancelled|canceled|aborted)\b/.test(msg))return {kind:'cancelled',hint:'The request was cancelled. You can submit it again.',retry:false};
-    if([401,403].includes(code)||/rejected.*key|unauthoriz|invalid.*api key|authentication|api.key.*invalid/.test(msg))return {kind:'auth',hint:'Open API settings and test or replace the key, then retry the same request.',retry:true,settings:true};
+    if([401,403].includes(code)||/rejected.*key|unauthoriz|invalid.*api key|authentication|api.key.*invalid|api key is missing/.test(msg))return {kind:'auth',hint:'Open API settings and test or replace the key, then retry the same request.',retry:true,settings:true};
     if(code===402||/balance|insufficient.quota|credits/.test(msg))return {kind:'quota',hint:'Check provider credits or choose a configured alternative in API settings.',retry:true,settings:true};
     if(code===429||/rate.limit|too many requests/.test(msg))return {kind:'rate',hint:'Wait briefly for the provider limit to reset, then retry. You can also choose another configured provider.',retry:true,settings:true};
-    if(code===408||code===504||/timed? ?out|timeout|took more than|deadline/.test(msg))return {kind:'timeout',hint:'The model took too long. Check gateway status or select faster routing, then retry.',retry:true,settings:true,fast:true};
+    if(error?.code==='timeout'||code===408||code===504||/timed? ?out|timeout|took more than|deadline/.test(msg))return {kind:'timeout',hint:'The model took too long. Check gateway status or select faster routing, then retry.',retry:true,settings:true,fast:true};
     if(code===404||/model.*not found|could not route/.test(msg))return {kind:'model',hint:'Check the configured model and gateway URL in API settings.',retry:true,settings:true};
     if(/no backup|add at least one api key|add another provider/.test(msg))return {kind:'gateway',hint:'Check the local .env provider configuration and restart the gateway if needed.',retry:true,settings:true};
     if(code>=500||/could not reach|could not connect|network|failed to fetch|gateway closed|unavailable/.test(msg))return {kind:'network',hint:'Check your connection and local gateway, or choose another provider before retrying.',retry:true,settings:true};

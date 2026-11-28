@@ -203,6 +203,7 @@ function offerRecovery(error, retry, valid=()=>true) {
   const info=learning.recovery(error);
   if(!info.retry||!valid())return;
   recoveryJob={retry,valid,info};
+  $('retry-request').textContent='Retry request';
   $('recovery-hint').textContent=info.hint;
   $('recovery-settings').hidden=!info.settings;
   $('recovery-fast').hidden=!(info.fast&&provider===freeLLM&&freeModel!=='auto:fast');
@@ -217,13 +218,14 @@ async function retryRecovery(fast=false) {
     try{saveApiSettings();}catch{}
   }
   clearRecovery();
-  await job.retry();
+  try { await job.retry(); }
+  catch(error){status(error.message,true);offerRecovery(error,job.retry,job.valid);}
 }
 $('retry-request').onclick=()=>retryRecovery();
 $('recovery-fast').onclick=()=>retryRecovery(true);
 $('recovery-settings').onclick=()=>settings();
 $('recovery-dismiss').onclick=clearRecovery;
-function asyncAction(action,capture=()=>null,valid=()=>true) {
+function asyncAction(action,capture=()=>null,valid=()=>true,retryLabel='Retry request') {
   async function execute(payload) {
     if (busy || !valid(payload)) return;
     clearRecovery();
@@ -234,6 +236,7 @@ function asyncAction(action,capture=()=>null,valid=()=>true) {
       if (operation === run) {
         status(error.message, true);
         offerRecovery(error,()=>execute(payload),()=>valid(payload));
+        if(recoveryJob) $('retry-request').textContent=retryLabel;
       }
     }
     finally { if (operation === run) busy = false; }
@@ -571,6 +574,7 @@ function openLesson(item, autoplay = false) {
   stopVoice();
   closePanels();
   current = item;
+  current.learningMode=learning.preferences({mode:item.learningMode||studyPreferences.mode}).mode;
   practiceEpoch++;
   practiceLevel=studyPreferences.difficulty==='auto'?learning.modes[learning.preferences({mode:item.learningMode||studyPreferences.mode}).mode].difficulty:studyPreferences.difficulty;
   practiceAttempts=new Map();
@@ -968,6 +972,7 @@ function showStep(index, autoplay = false, resumeCue = 0, keepReturn = false, po
   resumePoint=position;
   window.dogTutor?.setMood(autoplay?'idle':'listening');
   boardVersion++;
+  if(recoveryJob&&!recoveryJob.valid())clearRecovery();
   replayOnly = false;
   replayBookmark = undefined;
   $('return-replay').hidden = true;
@@ -1086,7 +1091,7 @@ async function api(path, body, signal) {
   });
   if (!response.ok) {
     const failure = await response.json().catch(() => ({}));
-    throw new Error(failure.error?.message || 'OpenAI returned HTTP ' + response.status + '.');
+    const error=Error(failure.error?.message || 'OpenAI returned HTTP ' + response.status + '.');error.status=response.status;throw error;
   }
   return response;
 }
@@ -1769,7 +1774,7 @@ function parseLesson(data) {
     }
   }
   result.sources = learning.sources([...unique.values()].map(source=>({...source,origin:'provider'})));
-  result.searched = result.sources.length>0 || (data.output || []).some(item => item.type === 'web_search_call' && item.status === 'completed');
+  result.searched = result.sources.some(source=>source.origin==='provider') || (data.output || []).some(item => item.type === 'web_search_call' && item.status === 'completed');
   return result;
 }
 const generationInstructions = {
@@ -1905,7 +1910,7 @@ async function customLesson(topic, files, search, options) {
     if (!response.ok) {
       if (automatic) {
         const failure = await response.json().catch(() => null);
-        throw Error(failure?.error?.message || 'Local API fallback returned HTTP ' + response.status + '.');
+        const error=Error(failure?.error?.message || 'Local API fallback returned HTTP ' + response.status + '.');error.status=response.status;throw error;
       }
       if ([401,403].includes(response.status)) {
         const failure = isFree && localGateway ? await response.json().catch(() => null) : null;
@@ -1928,7 +1933,7 @@ async function customLesson(topic, files, search, options) {
           + (extra.length ? 'Gateway details: ' + extra.join(', ') + '. ' : '')
           + 'Check the current model list or try another listed model.');
       }
-      throw Error('Gateway returned HTTP ' + response.status + '. Check the model and gateway status.');
+      const error=Error('Gateway returned HTTP ' + response.status + '. Check the model and gateway status.');error.status=response.status;throw error;
     }
     data = await response.json();
   } catch (error) {
@@ -1941,7 +1946,7 @@ async function customLesson(topic, files, search, options) {
   if ((automatic || isFree && localGateway) && Number.isInteger(data.fallbackSlot)) lesson.fallbackSlot = data.fallbackSlot;
   if (search) {
     const supplied = JSON.parse(answer.slice(answer.indexOf('{'),answer.lastIndexOf('}')+1)).sources;
-    if (Array.isArray(supplied)) lesson.sources = learning.sources(supplied.map(item=>({...item,origin:'suggested'})));
+    if (Array.isArray(supplied)) lesson.sources = learning.sources(supplied.filter(item=>item&&typeof item==='object').map(item=>({...item,origin:'suggested'})));
   }
   return lesson;
 }
@@ -1951,7 +1956,7 @@ async function dashRequest(service, body, signal, region = dashRegion, apiKey = 
   const response = await fetch(url, {method:'POST', headers:{Authorization:'Bearer ' + apiKey,'Content-Type':'application/json'},
     body:JSON.stringify(body),signal});
   const data = await response.json();
-  if (!response.ok || data.code) throw new Error(data.message || 'Alibaba Cloud returned HTTP ' + response.status);
+  if (!response.ok || data.code) {const error=Error(data.message || 'Alibaba Cloud returned HTTP ' + response.status);error.status=response.status;throw error;}
   return data;
 }
 
@@ -1980,7 +1985,7 @@ async function gemini(model, body, signal, apiKey = key) {
     body:JSON.stringify(body), signal
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message || 'Gemini returned HTTP ' + response.status);
+  if (!response.ok) {const error=Error(data.error?.message || 'Gemini returned HTTP ' + response.status);error.status=response.status;throw error;}
   const candidate = data.candidates?.[0];
   if (!candidate?.content?.parts?.length) throw new Error('Gemini returned no content. ' + (data.promptFeedback?.blockReason || candidate?.finishReason || 'Try again.'));
   return candidate;
@@ -2061,11 +2066,12 @@ async function loadLaterSteps(task,topic,files,search) {
       status('Later steps could not load. Your first step is saved. '+error.message,true);
       const lessonId=task.id;
       continuation=undefined;
-      if(!recoveryJob)offerRecovery(error,async()=>{
+      if(!recoveryJob){offerRecovery(error,async()=>{
         if(current?.id!==lessonId||continuation)return;
         continuation={id:lessonId,waitVersion:stepIndex===current.mainStepCount-1&&!voiceRequest&&!pausedForQuestion?boardVersion:undefined};
         await loadLaterSteps(continuation,topic,files,search);
       },()=>current?.id===lessonId&&!continuation);
+      if(recoveryJob&&recoveryJob.valid())$('retry-request').textContent='Retry remaining lesson';}
     }
   } finally {
     if (continuation === task) continuation = undefined;
@@ -2088,7 +2094,7 @@ $('start').onsubmit = asyncAction(async (run,payload) => {
   continuation = {id:lesson.id};
   void loadLaterSteps(continuation,subject,files,search);
   playVoice();
-},()=>({topic:$('topic').value.trim(),files:[...attachments],search:$('search').checked,mode:studyPreferences.mode}),()=>!$('home').hidden);
+},()=>({topic:$('topic').value.trim(),files:[...attachments],search:$('search').checked,mode:studyPreferences.mode}),()=>!$('home').hidden,'Retry original lesson');
 $('ask').onsubmit = asyncAction(async (run,payload) => {
   micSession?.cancelDraft?.();
   const {question,parent,step,version}=payload;
@@ -2121,7 +2127,7 @@ $('ask').onsubmit = asyncAction(async (run,payload) => {
   closePanels();
   showStep(first, true,0,true);
   status();
-},()=>({question:$('question').value.trim(),parent:current,step:current?.steps[stepIndex],version:boardVersion}),p=>Boolean(p?.parent&&current===p.parent&&current.steps[stepIndex]===p.step&&boardVersion===p.version));
+},()=>({question:$('question').value.trim(),parent:current,step:current?.steps[stepIndex],version:boardVersion}),p=>Boolean(p?.parent&&current===p.parent&&current.steps[stepIndex]===p.step&&boardVersion===p.version),'Retry original question');
 function renderPractice() {
   const panel=$('quiz');
   if (!current || panel.hidden) return;
