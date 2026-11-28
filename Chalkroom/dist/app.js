@@ -1790,27 +1790,27 @@ async function filePart(file) {
     /\.pdf$/i.test(file.name) ? 'application/pdf' : file.name.endsWith('.pptx') ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') + url.slice(url.indexOf(',')+1)};
 }
 function parseLesson(data) {
-  const parts = (data.output || []).flatMap(item => item.content || []).filter(item => item.type === 'output_text');
+  const parts = (Array.isArray(data?.output)?data.output:[]).flatMap(item => Array.isArray(item?.content)?item.content:[]).filter(item => item?.type === 'output_text' && typeof item.text==='string');
   const raw = parts.map(item => item.text).join('\n').trim();
   const from = raw.indexOf('{'), to = raw.lastIndexOf('}');
   let result;
   try { result = JSON.parse(raw.slice(from, to + 1)); }
   catch { throw new Error('The tutor did not return a readable lesson. Please try again.'); }
-  if (typeof result?.title !== 'string' || !Array.isArray(result.steps) || !result.steps.length ||
-      result.steps.some(step => !step || typeof step.title !== 'string' || typeof step.narration !== 'string' ||
-        !Array.isArray(step.lines) || step.lines.some(line => typeof line !== 'string'))) {
+  if (typeof result?.title !== 'string' || !result.title.trim() || !Array.isArray(result.steps) || !result.steps.length ||
+      result.steps.some(step => !step || typeof step.title !== 'string' || !step.title.trim() || typeof step.narration !== 'string' || !step.narration.trim() ||
+        !Array.isArray(step.lines) || !step.lines.length || step.lines.some(line => typeof line !== 'string' || !line.trim()))) {
     throw new Error('The tutor returned an incomplete whiteboard. Please try again.');
   }
   result.relevance = typeof result.relevance === 'string' ? result.relevance : '';
   result.questions = learning.questions(result.questions);
   const unique = new Map();
   for (const part of parts) {
-    for (const item of part.annotations || []) {
-      if (item.type === 'url_citation' && /^https?:\/\//i.test(item.url)) unique.set(item.url, {url:item.url,title:item.title});
+    for (const item of Array.isArray(part.annotations)?part.annotations:[]) {
+      if (item?.type === 'url_citation' && typeof item.url==='string' && /^https?:\/\//i.test(item.url)) unique.set(item.url, {url:item.url,title:item.title});
     }
   }
   result.sources = learning.sources([...unique.values()].map(source=>({...source,origin:'provider'})));
-  result.searched = result.sources.some(source=>source.origin==='provider') || (data.output || []).some(item => item.type === 'web_search_call' && item.status === 'completed');
+  result.searched = result.sources.some(source=>source.origin==='provider') || (Array.isArray(data?.output)?data.output:[]).some(item => item?.type === 'web_search_call' && item.status === 'completed');
   return result;
 }
 const generationInstructions = {
@@ -1838,6 +1838,8 @@ async function teach(text, files, search, phase = 'full', mode = current?.learni
   try {
     const lesson = await requestLesson(text,files,search,options);
     controller.signal.throwIfAborted();
+    if(phase==='first'&&lesson.steps.length!==1)lesson.steps=lesson.steps.slice(0,1);
+    if(phase.startsWith('practice_')&&!lesson.questions.some(q=>q.difficulty===phase.slice(9)))throw Error('The tutor returned no practice questions at the selected difficulty. Please try again.');
     lesson.learningMode=mode;
     lesson.searchRequested=Boolean(search);
     return lesson;
@@ -1934,7 +1936,7 @@ async function customLesson(topic, files, search, options) {
   const replacements = {'{{model}}':config.model,'{{prompt}}':instructions + '\n' + context};
   const body = config.template ? JSON.parse(config.template, (_,value) =>
     typeof value === 'string' && Object.hasOwn(replacements,value) ? replacements[value] : value) :
-    {model:config.model,messages:[{role:'system',content:instructions},{role:'user',content:context}]};
+    {model:config.model,messages:[{role:'system',content:instructions},{role:'user',content:context}],stream:false};
   const headers = new Headers({'Content-Type':'application/json'});
   if (!automatic) headers.set(config.header,[config.prefix,apiKey].filter(Boolean).join(' '));
   const localRoute = automatic || (isFree && localGateway && config.endpoint === window.location.origin + '/v1/chat/completions');
@@ -1950,14 +1952,17 @@ async function customLesson(topic, files, search, options) {
       }
       if ([401,403].includes(response.status)) {
         const failure = isFree && localGateway ? await response.json().catch(() => null) : null;
-        throw Error(isFree && localGateway
+        const error=Error(isFree && localGateway
           ? (failure?.error?.message || 'FreeLLMAPI rejected the saved gateway key (HTTP ' + response.status + '). Test the key and save a current unified key.')
-          : 'Gateway returned HTTP ' + response.status + '. Check your API key and its permissions.');
+          : 'Gateway returned HTTP ' + response.status + '. Check your API key and its permissions.');error.status=response.status;throw error;
       }
-      if (isFree && localGateway && response.status === 504) throw Error('FreeLLMAPI timed out before the model finished. Retry or change Model routing in API settings.');
+      if (isFree && localGateway && response.status === 504) {
+        const failure=await response.json().catch(()=>null);
+        const error=Error(failure?.error?.message || 'FreeLLMAPI timed out before the model finished. Retry or change Model routing in API settings.');error.status=504;throw error;
+      }
       if (isFree && localGateway && response.status === 502) {
         const failure = await response.json().catch(() => null);
-        if (typeof failure?.error?.message === 'string') throw Error('FreeLLMAPI: ' + failure.error.message.slice(0,300));
+        if (typeof failure?.error?.message === 'string') {const error=Error('FreeLLMAPI: ' + failure.error.message.slice(0,300));error.status=502;throw error;}
       }
       if (isHarbor && response.status === 402) throw Error('Token Harbor requires balance or an available free allowance for this model. Check the model ID and your Token Harbor dashboard.');
       if (isHarbor && response.status === 404) {
